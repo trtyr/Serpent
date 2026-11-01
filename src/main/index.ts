@@ -1,11 +1,7 @@
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -19,296 +15,42 @@ import {
   app,
   BrowserWindow,
   clipboard,
-  dialog,
   ipcMain,
   protocol,
   safeStorage,
-  screen,
-  shell,
-  nativeImage,
   utilityProcess,
 } from "electron";
-import type { MessageBoxOptions, NativeImage } from "electron";
 
-import {
-  installApplicationMenu,
-  setApplicationMenuCommandChecked,
-  setApplicationMenuCommandEnabled,
-  setApplicationMenuCommandLabel,
-} from "./application-menu";
-import { applyDevAppIcon, appIconImage } from "./app-icon";
-import { mcpFullAccessConfirmationCopy } from "./mcp-full-access-confirmation-copy";
 import { ArtifactPathCache } from "./artifact-path-cache";
-import { createWindowsInstallerCleanupInvocation } from "./windows-installer-cleanup";
 import { SourcePathCache, type SourcePathResolution } from "./source-path-cache";
-import {
-  NativeAssetDragCache,
-  startNativeAssetDrag,
-} from "./native-asset-drag";
-import { NativeAssetDragPrimeScheduler } from "./native-asset-drag-prime";
-import {
-  clearViewerVideoShortcutCapture,
-  isViewerVideoShortcutContentsActive,
-  setViewerVideoShortcutCaptureActive,
-  viewerShortcutScopeForContents,
-} from "./viewer-video-shortcut-capture";
-import { forwardViewerVideoShortcut } from "./viewer-video-shortcut-forward";
-import { forwardBrowseShortcut } from "./browse-shortcut-forward";
-import {
-  forwardApplicationShortcutToWindow,
-  isWindowsApplicationShortcut,
-  matchWindowsApplicationShortcut,
-  setWindowsApplicationShortcutAcceleratorsEnabled,
-  setWindowsBrowseShortcutAcceleratorsEnabled,
-} from "./viewer-video-shortcut-menu";
-import { matchBrowseKeyboardShortcut } from "../shared/browse-keyboard-shortcuts";
 import { artifactProtocolMimeForExtension } from "../shared/media-formats";
-import {
-  selectImportSources as selectImportSourcesDialog,
-  selectLibraryDirectory,
-  selectOpenFile,
-  selectSavePath,
-  selectPluginPackage,
-  type NativeDialogHost,
-} from "./native-dialogs";
-import { executeLibraryMainCommand } from "./commands/library";
-import { tryHandleLibraryOwnedRequest, tryBuildOpenRecentCommand } from "./library-request/library";
-import {
-  tryBuildIngestionCommand,
-  maybeProbeImportSequences,
-  tryHandleIngestionOwnedRequest,
-  applyImportWorkerResult,
-} from "./library-request/ingestion";
-import {
-  tryHandleSyncOwnedRequest,
-  applySyncWorkerBindings,
-  runSyncProbeWithRetry,
-  type SyncServerRecord,
-  type SyncBindingRecord,
-} from "./library-request/sync";
-import { tryHandleAiOwnedRequest } from "./library-request/ai";
+import type { SyncServerRecord, SyncBindingRecord } from "./sync-records";
 import {
   recoverAiProfileTransaction as recoverAiProfileTransactionFromJournal,
-  commitAiProfileTransaction as commitAiProfileTransactionToJournal,
-  type AiProfileCredentialMutation,
   type AiProfileTransactionIo,
 } from "./ai-profile-transaction";
 import {
   runAiProfileMigrationStartup,
 } from "./ai-profile-legacy-config";
 import {
-  activateAiProfile,
   AiProfileStorageError,
   captureAiConnectionSnapshot,
-  createAiProfileId,
-  deleteAiProfile,
   emptyAiProfileCatalog,
-  AiProfileValidationError,
   isAiProfileId,
   legacyAiConnectionProfile,
   migrateAiProfileStorage,
   parseAiProfileCatalog,
   resolveAiCredential,
-  saveAiConnectionProfile as saveAiProfileInCatalog,
   summarizeAiProfiles,
-  type AiConnectionProfileDraft,
   type AiProfileCatalog,
 } from "./ai-profile-store";
 import { readAtomicJsonFile, writeAtomicJsonFile } from "./atomic-json-file";
-import { tryHandleEmbeddingModelRequest } from "./library-request/embedding-models";
-import { EmbeddingTestIndex } from "./embedding-test-index";
-import { EmbeddingHttpIndex } from "./embedding-http-index";
-import {
-  inspectManagedEmbeddingInstall,
-  resolveInstalledEmbeddingLayout,
-} from "./embedding-install";
-import {
-  parseEmbeddingBindings,
-  type EmbeddingLibraryBinding,
-} from "./embedding-library-binding";
-import {
-  parseEmbeddingServiceCatalog,
-  type EmbeddingServiceCatalog,
-} from "./embedding-service-registry";
-import type { EmbeddingModelCatalog } from "./embedding-model-catalog";
-import { parseEmbeddingModelCatalog } from "./embedding-model-catalog";
-import { resolveEffectiveEmbeddingSelection } from "../shared/embedding/library-binding";
-import { tryHandlePreviewOwnedRequest } from "./library-request/preview";
-import { tryHandleMediaShellWorkerResult } from "./library-request/media-shell";
-import { maybePrimeNativeDrag } from "./library-request/native-drag";
-import { toRendererResult } from "./library-request/renderer-result";
-import { tryHandleRelinkOwnedRequest, maybeRememberRelinkPreview } from "./library-request/relink";
-import {
-  prepareLibraryLifecycle,
-  applyLibraryWorkerSideEffects,
-  applyExternalLibrarySourceCleanup,
-  mapBillfishInspectedDisplayName,
-  applyLibraryRendererLifecycle,
-  tryHandleRecoveryReport,
-  maybeBeginLibraryDeleteFromDisk,
-  applyLibraryReplacementAfterWorker,
-  maybeDelayE2eTrash,
-  externalSourceRootFromCommand,
-} from "./library-request/lifecycle";
-import { executeFolderMainCommand } from "./commands/folders";
-import { executeAssetIngestionMainCommand } from "./commands/asset-ingestion";
-import { executeLinkedFolderMainCommand } from "./commands/linked-folders";
-import { executeIgnoreMainCommand } from "./commands/ignore";
-import { executeTagMainCommand } from "./commands/tags";
-import { executeCollectionMainCommand } from "./commands/collections";
-import { executeAssetQueryMainCommand } from "./commands/asset-query";
-import { executeBrowseSessionMainCommand } from "./commands/browse-session";
-import { executeSmartCollectionMainCommand } from "./commands/smart-collections";
-import { executeAssetMutationMainCommand } from "./commands/asset-mutations";
-import { executeLibraryTransferMainCommand } from "./commands/library-transfer";
-import { executeAiMainCommand } from "./commands/ai";
-import { executeMediaJobMainCommand } from "./commands/media-jobs";
-import { executeSyncMainCommand } from "./commands/sync";
-import { executeMediaPathMainCommand } from "./commands/media-paths";
-import {
-  ExternalLibraryArchiveError,
-  materializeExternalLibrarySource,
-  sweepOrphanExternalLibraryStaging,
-  type MaterializedExternalLibrarySource,
-} from "./external-library-archive";
-import {
-  mapSystemLocaleToAppLocale,
-  tryParseAppLocaleSync,
-  type AppLocale,
-} from "../shared/native-dialog-i18n";
-import {
-  createAppUpdateService,
-  type AppUpdateFetch,
-  type AppUpdateService,
-} from './app-update-service';
-import type {
-  AppUpdateCheckResult,
-  AppUpdateInstallResult,
-} from '../shared/app-update';
-import {
-  applyStartupLoginItem,
-  readStartupPreferences,
-  startupPreferencesSnapshot as createStartupPreferencesSnapshot,
-  startupPreferencesFilePath,
-  writeStartupPreferences,
-} from './startup-preferences-store';
-import {
-  shouldHandleSecondaryLaunch,
-  shouldShowMainWindowOnReady,
-  type StartupPreferences,
-  type StartupPreferencesSnapshot,
-} from '../shared/startup-preferences';
-import {
-  readShortcutBindings,
-  shortcutBindingsFilePath,
-  writeShortcutBindings,
-} from './shortcut-bindings-store';
-import {
-  parseShortcutBindings,
-  parseShortcutChord,
-  shortcutPlatformFromProcess,
-  withPlatformBindings,
-  type ShortcutOverride,
-} from '../shared/shortcut-bindings';
-import { findShortcutAction } from '../shared/shortcut-catalog';
-import {
-  findAllShortcutConflicts,
-  validateShortcutBindings,
-  validateShortcutChord,
-} from '../shared/shortcut-resolution';
-import type {
-  ShortcutBindingsSetResult,
-  ShortcutFileExportResult,
-  ShortcutFileImportResult,
-} from '../shared/shortcut-api';
-import { resolveNativeDialogCopy } from '../shared/native-dialog-i18n';
-
-import { popupEditContextMenu } from "./edit-context-menu";
-import {
-  createFileClipboardDeps,
-  readFilePathsFromClipboard,
-  writeFilePathsToClipboard,
-} from "./file-clipboard";
-import {
-  createOpenWithDeps,
-  openPathWithOtherApplication,
-} from "./open-with";
-import {
-  bindWindowMaximizedEvents,
-  registerWindowControls,
-} from "./window-controls";
-import { sendToLiveWebContents } from "./web-contents-send";
-import {
-  bindRendererKeyboardFocusLogger,
-  ensureRendererKeyboardFocus,
-} from "./renderer-keyboard-focus";
-import {
-  createWindowsTray,
-  type WindowsTrayController,
-} from "./windows-tray";
-import {
-  ASSET_CHANGE_CHANNEL,
-  ASSET_NATIVE_DRAG_CHANNEL,
-  ASSET_NATIVE_DRAG_PRIME_CHANNEL,
-  EXTENSION_SAVE_COMPLETED_CHANNEL,
-  THUMBNAIL_CHANNEL,
-  ACTIVE_CONTEXT_CHANNEL,
-  APP_LOCALE_CHANNEL,
-  LIBRARY_LIFECYCLE_CHANNEL,
-  LIBRARY_CHANGED_CHANNEL,
-  LIBRARY_REQUEST_CHANNEL,
-  PROGRESS_CHANNEL,
-  AI_PROGRESS_CHANNEL,
-  AI_COMPLETED_CHANNEL,
-  AI_CLEARED_CHANNEL,
-  OPEN_EXTERNAL_URL_CHANNEL,
-  APP_UPDATE_CHECK_CHANNEL,
-  APP_UPDATE_INSTALL_CHANNEL,
-  APP_UPDATE_CANCEL_CHANNEL,
-  APP_UPDATE_PROGRESS_CHANNEL,
-  STARTUP_PREFERENCES_GET_CHANNEL,
-  STARTUP_PREFERENCES_SET_CHANNEL,
-  SHORTCUT_BINDINGS_EXPORT_CHANNEL,
-  SHORTCUT_BINDINGS_GET_CHANNEL,
-  SHORTCUT_BINDINGS_IMPORT_CHANNEL,
-  SHORTCUT_BINDINGS_SET_CHANNEL,
-  REVEAL_APP_LOG_CHANNEL,
-  READ_APP_LOG_CHANNEL,
-  SHOW_EDIT_CONTEXT_MENU_CHANNEL,
-  SHELL_NOTIFY_CHANNEL,
-  COMMAND_COMPLETED_CHANNEL,
-  APPLICATION_MENU_ITEM_STATE_CHANNEL,
-  LINKED_MISSING_VISIBILITY_CHANNEL,
-  SHELL_SWIPE_CHANNEL,
-  WINDOW_FOCUS_CHANNEL,
-  NATIVE_EDIT_COPY_CHANNEL,
-  NATIVE_EDIT_COMMAND_CHANNEL,
-  PLUGIN_MANAGER_CHANNEL,
-  PLUGIN_INSTALL_PROGRESS_CHANNEL,
-  EMBEDDING_INSTALL_PROGRESS_CHANNEL,
-  PLUGIN_CONTRIBUTIONS_CHANGED_CHANNEL,
-  PLUGIN_INPUT_CAPTURE_EVENT_CHANNEL,
-  PLUGIN_INPUT_CAPTURE_SESSIONS_CHANNEL,
-  PLUGIN_INPUT_CAPTURE_SYSTEM_MODAL_CHANNEL,
-  VIEWER_VIDEO_SHORTCUTS_ACTIVE_CHANNEL,
-  BROWSE_SHORTCUT_MENU_ENABLED_CHANNEL,
-  APPLICATION_SHORTCUTS_ENABLED_CHANNEL,
-  OFFSCREEN_THUMBNAIL_FRAME_CHANNEL,
-  MCP_SETTINGS_REQUEST_CHANNEL,
-  MCP_SETTINGS_EVENT_CHANNEL,
-} from "../shared/protocol/channels";
+import { sweepOrphanExternalLibraryStaging } from "./external-library-archive";
+import { OFFSCREEN_THUMBNAIL_FRAME_CHANNEL } from "../shared/protocol/channels";
 import {
   createAutomationCommandGateway,
   type AutomationCommandGateway,
 } from '../automation/command-gateway';
-import {
-  PLUGIN_UI_DIALOG_PATCH_CHANNEL,
-  PLUGIN_UI_DIALOG_REQUEST_CHANNEL,
-  PLUGIN_UI_DIALOG_RESULT_CHANNEL,
-  PLUGIN_UI_WIDGET_EVENT_CHANNEL,
-  pluginUiDialogResultPayloadSchema,
-  pluginUiWidgetEventPayloadSchema,
-} from '../shared/plugin-ui-dialog-bridge';
 import { resolveHostMediaBinaries } from './media-binary-env';
 import { PluginHostCommandError } from '../shared/plugin-host-command-error';
 import {
@@ -316,10 +58,7 @@ import {
   createAppAssetResponse,
 } from './app-assets';
 import { AutomationLibraryWorkerAdapter } from './automation-worker-adapter';
-import {
-  createDesktopAutomationFilePlanApprovalHandler,
-  type DesktopAutomationFilePlanSummary,
-} from './automation-file-plan-approval';
+import { createDesktopAutomationFilePlanApprovalHandler } from './automation-file-plan-approval';
 import {
   AutomationExecutionJournal,
   AutomationLibraryContextError,
@@ -327,60 +66,21 @@ import {
   projectAutomationExecutionStatus,
 } from './automation-execution-journal';
 import { createJsonFileAutomationIdempotencyStore } from './automation-idempotency-store';
-import { EmbeddedMcpServer, EmbeddedMcpServerError } from './embedded-mcp-server';
-import { McpCredentialStoreError } from './mcp-client-credentials';
-import { McpPermissionBroker } from './mcp-permission-broker';
-import { McpPermissionPolicyStore } from './mcp-permission-policy-store';
-import { McpOperationChallengeStore } from './mcp-operation-challenge';
-import { CriticalConfirmationWindowManager } from './critical-confirmation-window';
-import { RendererCriticalConfirmationBroker } from './critical-confirmation-prompt';
-import {
-  criticalConfirmationInitialFocusForOperation,
-  criticalDiskDeleteConfirmLabel,
-} from '../shared/critical-confirmation';
-import {
-  mcpSettingsRequestSchema,
-  mcpSettingsResponseSchema,
-  mcpSettingsSnapshotSchema,
-  type McpSettingsRequest,
-} from '../shared/mcp';
-import { registerAutomationScriptIpc } from './automation-script-ipc';
-import { AutomationScriptFileService } from './automation-script-file-service';
-import {
-  createJsonFileAutomationRecentScriptsStore,
-  type AutomationRecentScriptsStore,
-} from './automation-recent-scripts-store';
-import { ScriptRuntimeSupervisor } from './script-runtime-supervisor';
 import { PluginRuntimeSupervisor, type PluginRuntimeHostCommandHandler, type PluginRuntimeInputCaptureStartHandler, type PluginRuntimeJobControlHandler, type PluginRuntimeJobEnqueueHandler, type PluginRuntimeJobProgressHandler, type PluginRuntimeStorageHandler } from './plugin-runtime-supervisor';
 import { normalizeAutomationAssetSearchInput } from './normalize-automation-asset-search-input';
 import { PluginTrustedRuntimeSupervisor } from './plugin-trusted-runtime-supervisor';
-import { PluginInputCaptureBroker } from '../shared/plugin-input-capture';
-import {
-  parsePluginInputCapturePublishPayload,
-  parsePluginInputCaptureSystemModalPayload,
-  type PluginInputCaptureSessionsPayload,
-} from '../shared/plugin-input-capture-renderer';
 import { PluginActivationCoordinator } from './plugin-activation-coordinator';
 import { PluginJobScheduler } from './plugin-job-scheduler';
 import { PluginProviderScheduler } from './plugin-provider-scheduler';
 import { pluginTargetLibraryIdSchema } from '../plugins/plugin-commands';
-import {
-  PLUGIN_GLOBAL_RUNTIME_LIBRARY_ID,
-  pluginHostCommandRequiresBoundLibrary,
-  resolvePluginHostCommandLibraryId,
-} from '../plugins/plugin-host-command-target';
+import { pluginHostCommandRequiresBoundLibrary, resolvePluginHostCommandLibraryId } from '../plugins/plugin-host-command-target';
 import { PluginStorageStore, PluginStorageStoreError } from './plugin-storage-store';
-import { PluginSettingsStore } from './plugin-settings-store';
-import { PluginMcpExposureStore } from './plugin-mcp-exposure-store';
-import { PluginMcpToolProvider } from './plugin-mcp-tool-provider';
 import { automationCapabilitiesFromPluginPermissions } from '../plugins/plugin-permission-capabilities';
 import { createContributionRegistry } from '../plugins/plugin-contributions';
 import { createPluginProviderRegistry } from '../plugins/plugin-providers';
 import { pluginJobOwnerCanRetry, pluginJobOwnerMatches } from '../plugins/plugin-jobs';
 import { loadOrCreatePluginDeviceId } from './plugin-device-identity';
-import { createPluginPackageRequestHandler } from './plugin-package-ipc';
 import { PluginPackageManager } from './plugin-package-manager';
-import { PluginCommunityCatalogStore } from './plugin-community-catalog-store';
 import { PLUGIN_API_VERSION } from '../plugins/plugin-manifest';
 import {
   createPluginDomainEvent,
@@ -388,73 +88,24 @@ import {
 } from '../plugins/plugin-domain-events';
 import type { AutomationExecutionContext } from '../automation/command-gateway';
 import {
+  automationCapabilityRegistry,
   AUTOMATION_API_VERSION,
   type AutomationCommandId,
-  type AutomationSource,
 } from '../automation/command-registry';
+import { toPublicError } from "../shared/protocol/errors";
 import {
-  attachLinuxRoundedCorners,
-  linuxRoundedWindowOptions,
-  shouldUseLinuxRoundedCorners,
-} from "./linux-window-corners";
-import {
-  shouldHideApplicationMenuBar,
-  shouldUseFramelessTitleBar,
-} from "../shared/window-controls";
-import { matchViewerVideoLetterShortcut, viewerShortcutRepeatForward } from "../shared/viewer-video-shortcuts";
-import {
-  resolveOpenExternalUrlTarget,
-  type OpenExternalUrlResult,
-  type RevealAppLogResult,
-} from "../shared/external-url";
-import { parseReadAppLogRequest, type ReadAppLogResult } from "../shared/app-log";
-import type { ShowEditContextMenuResult } from "../shared/edit-context-menu";
-import {
-  createPublicError,
-  toPublicError,
-} from "../shared/protocol/errors";
-import {
-  LibraryParentError,
-} from "../worker/library-parent";
-import {
-  parseNativeAssetDragRequest,
-  parseRendererRequest,
-  tryParseActiveContext,
-  type RendererRequest,
-  type WorkerCommand,
-} from "../shared/protocol/requests";
-import {
-  parseRendererLifecycleEvent,
-  type RendererLifecycleEvent,
-  type RendererResult,
   type AssetChangeEvent,
   parseAssetChangeEvent,
   type LibraryChangedEvent,
   parseLibraryChangedEvent,
-  type ExtensionSaveCompletedEvent,
-  parseExtensionSaveCompletedEvent,
-  type ProgressEvent,
-  type AiProgressEvent,
-  type AiAnalysisCompletedEvent,
-  type AiContentClearedEvent,
   type ImageSequenceImportOffer,
-  parseAiProgressEvent,
-  parseAiAnalysisCompletedEvent,
-  parseAiContentClearedEvent,
 } from "../shared/protocol/responses";
-import { LibraryWorkerClient, WorkerRequestTimeoutError } from "./worker-client";
-import { performanceConsumerIdForWindow } from "../shared/performance-contract";
+import { LibraryWorkerClient } from "./worker-client";
+import { createHttpApiServer, HTTP_API_DEFAULT_PORT, type HttpApiServer } from "./http-api-server";
+import { readOrCreateApiToken } from "./api-token-store";
 import { SyncAutoScheduler, type SyncBindingLike } from "./sync-auto-scheduler";
 import { AppLogger } from "./app-logger";
 import { chooseUniqueSessionLogPath, pruneSessionLogs } from "./session-log";
-import {
-  logRendererChildProcessGone,
-  logRendererConsoleMessage,
-  logRendererProcessGone,
-  logRendererResponsive,
-  logRendererUnresponsive,
-} from "./renderer-diagnostics";
-import { pickIsolatedWindowPlacement } from "./e2e-isolated-window";
 import {
   clearActiveRecentLibrary,
   recentLibraryAutoOpenEnabled,
@@ -503,10 +154,7 @@ import { createArtifactResponse } from "./artifact-response";
 import { PreviewCache } from "./preview-cache";
 import {
   bindLibraryMediaReadSignal,
-  beginLibraryDeleteMediaFence,
-  endLibraryDeleteMediaFence,
   isLibraryMediaReadBlocked,
-  unblockLibraryMediaReads,
 } from "./library-media-reads";
 import {
   createOffscreenThumbnailRenderer,
@@ -520,33 +168,7 @@ import {
   registerModelThumbnailSourceAuthorizations,
   resolveModelThumbnailSourceAuthorization,
 } from "./model-thumbnail-source-cache";
-import {
-  createExtensionServer,
-  type ExtensionServer,
-  type SaveIntent,
-  type SaveIntentDisposition,
-  type SaveUploadDisposition,
-  type SaveUploadRequest,
-  type ListFoldersDisposition,
-  extensionCollectionSummaries,
-  type ListCollectionsDisposition,
-} from "./extension-server";
-import {
-  readExtensionBrowseFolderIds,
-  recordExtensionBrowseFolder,
-} from "./extension-recent-browse-folders";
-import { resolveExtensionSaveRouting } from "./extension-save-context";
-import { RelinkPreviewStore } from "./relink-preview-store";
-import {
-  cleanupClipboardImage,
-  cleanupStaleClipboardImages,
-} from "./desktop-ingestion";
 import { serpentProtocolSchemes } from "./serpent-protocol-privileges";
-import {
-  parsePluginUiAssetRequestFromNavigation,
-  rewritePluginUiHtmlAssetUrls,
-  pluginUiMimeType,
-} from "./plugin-ui-assets";
 
 // Headless E2E hosts may expose no hardware WebGL implementation. Opt those
 // tests into Chromium's explicitly acknowledged software path; production
@@ -616,58 +238,11 @@ const hasSingleInstanceLock = allowMultiInstance
   ? true
   : app.requestSingleInstanceLock();
 
-let mainWindow: BrowserWindow | undefined;
 const mainProcessSessionId = randomUUID();
-/** Effective UI locale for native dialogs; synced from Renderer (Serpent-bwb). */
-let appLocale: AppLocale = "en";
 let workerClient: LibraryWorkerClient | undefined;
-let embeddingTestIndex: EmbeddingTestIndex | undefined;
-let embeddingHttpIndex: EmbeddingHttpIndex | undefined;
+/** Latest worker change sequence per library, echoed on HTTP API responses. */
+const libraryChangeSequences = new Map<string, number>();
 
-function embeddingIndex(): EmbeddingTestIndex {
-  embeddingTestIndex ??= new EmbeddingTestIndex({
-    configDirectories: [process.cwd(), app.getAppPath()],
-    ...(process.platform === "win32"
-      ? { koffiPath: createRequire(path.join(app.getAppPath(), "package.json")).resolve("koffi") }
-      : {}),
-    requestWorker: (command) => {
-      if (!workerClient) return Promise.reject(new Error("Library Worker is unavailable."));
-      return workerClient.request(command);
-    },
-    installedLayout: (modelId) => resolveInstalledEmbeddingLayout(
-      inspectManagedEmbeddingInstall(app.getPath("userData")),
-      modelId,
-    ),
-    resolveMediaBinaries: resolveHostMediaBinaries,
-  });
-  return embeddingTestIndex;
-}
-
-function embeddingHttp(): EmbeddingHttpIndex {
-  embeddingHttpIndex ??= new EmbeddingHttpIndex({
-    requestWorker: (command) => {
-      if (!workerClient) return Promise.reject(new Error("Library Worker is unavailable."));
-      return workerClient.request(command);
-    },
-    loadService: (id) => parseEmbeddingServiceCatalog(readEmbeddingServices()).services.find((service) => service.id === id) ?? null,
-    readKey: readEmbeddingServiceKey,
-    isLibraryEnabled: (libraryId, serviceId) => {
-      const binding = readEmbeddingBindings()[libraryId];
-      // Renderer selects the global default when the library inherits settings.
-      // Main does not own that preference; an absent per-library binding must
-      // therefore allow the already-routed service request.
-      if (!binding) return true;
-      const defaultModelId = parseEmbeddingModelCatalog(readEmbeddingModels()).defaultModelId ?? "";
-      return resolveEffectiveEmbeddingSelection({
-        globalEnabled: true,
-        defaultModelId,
-        libraryBinding: binding,
-      }) === serviceId;
-    },
-  });
-  return embeddingHttpIndex;
-}
-/** 自动同步调度器（Serpent-bfsb 后续），随 Worker 生命周期启停。 */
 let syncAutoScheduler: SyncAutoScheduler | undefined;
 type ArtifactPathBatchWaiter = {
   artifactId: string;
@@ -678,26 +253,8 @@ type ArtifactPathBatchWaiter = {
 const artifactPathBatches = new Map<string, ArtifactPathBatchWaiter[]>();
 const artifactPathCache = new ArtifactPathCache(4_096);
 
-function clearArtifactPathCache(libraryId?: string): void {
-  if (libraryId === undefined) {
-    artifactPathCache.clear();
-    return;
-  }
-  artifactPathCache.clearLibrary(libraryId);
-}
-
 function evictArtifactPathCache(libraryId: string): void {
   artifactPathCache.evictLibrary(libraryId);
-}
-
-function cancelArtifactPathBatches(libraryId: string): void {
-  const prefix = `${libraryId}\u0000`;
-  const error = new Error('Library closed before artifact path resolution completed.');
-  for (const [key, waiters] of artifactPathBatches) {
-    if (!key.startsWith(prefix)) continue;
-    artifactPathBatches.delete(key);
-    for (const waiter of waiters) waiter.reject(error);
-  }
 }
 
 function resolveArtifactPathBatched(
@@ -776,44 +333,6 @@ function resolveArtifactPathBatched(
     }, 2);
   });
 }
-const nativeAssetDragCache = new NativeAssetDragCache();
-/**
- * Serpent-8ee170: every media completion enqueues here instead of issuing its
- * own Worker request, so a 2,000-job wave cannot become 2,000 background
- * requests competing with the queue that produced them.
- */
-const nativeAssetDragPrimer = new NativeAssetDragPrimeScheduler({
-  fetchEntries: async (libraryId, assetIds) => {
-    if (!workerClient) return null;
-    try {
-      const result = await workerClient.request({
-        type: "media.get-asset-drag-infos",
-        libraryId,
-        assetIds: [...assetIds],
-      });
-      return result.ok && result.type === "media.asset-drag-infos" ? result.entries : null;
-    } catch (error) {
-      logger?.info("main.native-asset-drag-cache", "Could not preheat native drag entries.", {
-        libraryId,
-        assetCount: assetIds.length,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  },
-  applyEntries: (libraryId, entries, mode) => {
-    if (mode === "replace") {
-      nativeAssetDragCache.replace(libraryId, entries as Parameters<NativeAssetDragCache["replace"]>[1]);
-    } else {
-      nativeAssetDragCache.upsert(libraryId, entries as Parameters<NativeAssetDragCache["upsert"]>[1]);
-    }
-  },
-});
-
-function clearNativeAssetDragCache(libraryId: string): void {
-  nativeAssetDragCache.clear(libraryId);
-  nativeAssetDragPrimer.invalidate(libraryId);
-}
 /**
  * Serpent-1e3d4f: Chromium never persists custom-protocol responses on disk,
  * so every session re-reads preview bytes from (possibly remote) origin.
@@ -843,74 +362,23 @@ function initializePreviewCache(): void {
 /** Slice E: shared offscreen window that renders model thumbnails (Serpent-hnmg). */
 let offscreenThumbnailRenderer: OffscreenThumbnailRenderer | undefined;
 let quitAfterShutdown = false;
-let applicationQuitting = false;
 let applicationShutdownPromise: Promise<void> | null = null;
-let updateHandoff = false;
-let startupComplete = false;
-const UPDATE_HANDOFF_EXIT_MS = 8_000;
 let logger: AppLogger | undefined;
 const VIEWER_TIMING_LOG = process.env.SERPENT_VIEWER_TIMING_LOG === "1";
 let appLogPath: string | undefined;
-let appUpdateService: AppUpdateService | undefined;
 let automationExecutionJournal: AutomationExecutionJournal | undefined;
-let embeddedMcpServer: EmbeddedMcpServer | undefined;
-let embeddedMcpInitializationFailure: McpCredentialStoreError | undefined;
 let automationCommandGateway: AutomationCommandGateway | undefined;
-let mcpPermissionPolicyStore: McpPermissionPolicyStore | undefined;
-let mcpOperationChallengeStore: McpOperationChallengeStore | undefined;
-let mcpPermissionBroker: McpPermissionBroker | undefined;
-let criticalConfirmationWindowManager: CriticalConfirmationWindowManager | undefined;
-let criticalConfirmationBroker: RendererCriticalConfirmationBroker | undefined;
-let scriptRuntimeSupervisor: ScriptRuntimeSupervisor | undefined;
 let pluginRuntimeSupervisor: PluginRuntimeSupervisor | undefined;
 let pluginTrustedRuntimeSupervisor: PluginTrustedRuntimeSupervisor | undefined;
-let pluginInputCaptureBroker: PluginInputCaptureBroker | undefined;
-let pluginInputCaptureFlushTimer: NodeJS.Timeout | undefined;
 let pluginActivationCoordinator: PluginActivationCoordinator | undefined;
+let httpApiServer: HttpApiServer | undefined;
 let pluginJobScheduler: PluginJobScheduler | undefined;
 let pluginProviderScheduler: PluginProviderScheduler | undefined;
-let automationScriptFiles: AutomationScriptFileService | undefined;
-let automationRecentScripts: AutomationRecentScriptsStore | undefined;
 let pluginPackageManager: PluginPackageManager | undefined;
-let pluginMcpToolProvider: PluginMcpToolProvider | undefined;
 const pluginAutomationContexts = new Map<string, AutomationExecutionContext>();
 
-function buildPluginInputCaptureSessionsPayload(): PluginInputCaptureSessionsPayload {
-  const sessions = pluginInputCaptureBroker?.activeSessions() ?? [];
-  return {
-    sessions: sessions.map((session) => ({
-      sessionId: session.sessionId,
-      scope: session.scope,
-      ...(session.ownerViewId === undefined ? {} : { ownerViewId: session.ownerViewId }),
-      keyboard: session.keyboard,
-      pointer: session.pointer,
-    })),
-  };
-}
-
-function publishPluginInputCaptureSessionsToRenderer(): void {
-  if (!mainWindow) return;
-  mainWindow.webContents.send(
-    PLUGIN_INPUT_CAPTURE_SESSIONS_CHANNEL,
-    buildPluginInputCaptureSessionsPayload(),
-  );
-}
-
-function schedulePluginInputCaptureFlush(): void {
-  if (pluginInputCaptureFlushTimer !== undefined) return;
-  pluginInputCaptureFlushTimer = setTimeout(() => {
-    pluginInputCaptureFlushTimer = undefined;
-    pluginInputCaptureBroker?.flush();
-  }, 0);
-}
-let windowsTray: WindowsTrayController | undefined;
-
-/**
- * Known libraries for the native 资源库 menu, most recently opened first.
- * Read fresh on every (re)install so the section tracks the store; labels are
- * literal names, so no i18n resolution is needed for them.
- */
-function nativeMenuRecentLibraries(): { path: string; name: string }[] {
+/** Most recently opened libraries, most recent first. Feeds headless auto-open. */
+function readRecentLibrariesForAutoOpen(): { path: string; name: string }[] {
   return readRecentLibraryEntries(recentLibraryPath(), (error) => {
     logger?.error("recent-library.read", error);
   }).map((entry) => ({ path: entry.path, name: entry.name }));
@@ -1029,24 +497,8 @@ function rememberOpenedLibrary(libraryPath: string, displayName: string, library
       },
     },
   );
-  refreshApplicationMenuRecentLibraries();
 }
 
-/**
- * Re-installs the native menu so its 资源库 → 最近使用的资源库 section tracks the
- * store. Called after any recent-library mutation (open, forget, remove).
- */
-function refreshApplicationMenuRecentLibraries(): void {
-  if (process.platform !== "darwin") return;
-  installApplicationMenu({
-    locale: appLocale,
-    recentLibraries: nativeMenuRecentLibraries(),
-    shortcutBindings: readShortcutBindingsSnapshot(),
-  });
-}
-
-let extensionServer: ExtensionServer | undefined;
-let extensionBrowseFoldersStorePath: string | undefined;
 const aiQueueScheduler = new AiQueueScheduler(processAiQueueBatch, {
   batchSize: AI_ANALYSIS_QUEUE_BATCH_SIZE,
   baseRetryDelayMs: DEFAULT_AI_RELIABILITY_SETTINGS.retryBaseDelayMs,
@@ -1055,30 +507,13 @@ const aiQueueScheduler = new AiQueueScheduler(processAiQueueBatch, {
 });
 
 // Maps BrowserWindow.id to the active library/folder context for extension save.
-const focusedContexts = new Map<
-  number,
-  { libraryId: string | null; selectedFolderId?: string }
->();
-// Last Serpent window that published browse context or received OS focus.
-let lastExtensionTargetWindowId: number | undefined;
 
-// Keeps selected roots in Main. Renderer receives only an opaque, one-shot token.
-const pendingRelinkPreviews = new RelinkPreviewStore();
 const sourcePathCache = new SourcePathCache();
 
-// Pending import source path (importId -> sourceFolderPath), remembered after validation.
-const pendingImportSources = new Map<string, string>();
 
 // External-library source chosen and validated; Renderer never receives the
 // path. For archive sources this is the extracted temporary root. Cleared
 // after destination is chosen, on inspect cancel, or when a new inspect starts.
-let pendingEagleOpenSourcePath: string | undefined;
-let pendingBillfishOpenSourcePath: string | undefined;
-type ActiveLibraryOpenCancellation = { cancelled: boolean };
-let activeLibraryOpenCancellation: ActiveLibraryOpenCancellation | undefined;
-// A corrupt plugin trust file is recovered before the first window is loaded;
-// keep a one-shot notice until Renderer has subscribed to shell notifications.
-let pendingPluginDeviceStateRecoveryNotice = false;
 
 // Archive-backed external libraries are extracted into Main-owned temporary
 // directories. The Worker only receives the extracted root; these callbacks
@@ -1088,35 +523,6 @@ const liveExternalLibraryStagingRoots = new Set<string>();
 
 function externalLibraryStagingStorePath(): string {
   return path.join(app.getPath("userData"), "external-library-staging.json");
-}
-
-function persistExternalLibraryStagingRoot(root: string): void {
-  const storePath = externalLibraryStagingStorePath();
-  const current = readExternalLibraryStagingRoots(storePath, (error) => {
-    logger?.error("external-library.staging-store.read", error);
-  });
-  writeExternalLibraryStagingRoots(storePath, [...current, root], (error) => {
-    logger?.error("external-library.staging-store.write", error);
-  });
-}
-
-function forgetExternalLibraryStagingRoot(root: string): void {
-  const storePath = externalLibraryStagingStorePath();
-  const current = readExternalLibraryStagingRoots(storePath, (error) => {
-    logger?.error("external-library.staging-store.read", error);
-  });
-  writeExternalLibraryStagingRoots(
-    storePath,
-    current.filter((value) => value !== root),
-    (error) => {
-      logger?.error("external-library.staging-store.write", error);
-    },
-  );
-}
-
-function rememberExternalSource(materialized: MaterializedExternalLibrarySource): string {
-  externalSourceCleanups.set(materialized.sourceRootPath, materialized.cleanup);
-  return materialized.sourceRootPath;
 }
 
 async function cleanupExternalSource(sourceRootPath: string | undefined): Promise<void> {
@@ -1134,39 +540,6 @@ async function cleanupExternalSource(sourceRootPath: string | undefined): Promis
 async function cleanupAllExternalSources(): Promise<void> {
   const sourceRoots = [...externalSourceCleanups.keys()];
   await Promise.all(sourceRoots.map((sourceRootPath) => cleanupExternalSource(sourceRootPath)));
-}
-
-async function materializeSelectedExternalLibrary(input: {
-  readonly sourcePath: string;
-  readonly kind: "eagle" | "billfish";
-  readonly fallbackDirectory?: string;
-}): Promise<MaterializedExternalLibrarySource> {
-  return materializeExternalLibrarySource({
-    sourcePath: input.sourcePath,
-    kind: input.kind,
-    preferredTempDirectory: tmpdir(),
-    fallbackTempDirectory: input.fallbackDirectory,
-    registerStagingRoot: (root) => {
-      liveExternalLibraryStagingRoots.add(root);
-      persistExternalLibraryStagingRoot(root);
-    },
-    unregisterStagingRoot: (root) => {
-      liveExternalLibraryStagingRoots.delete(root);
-      forgetExternalLibraryStagingRoot(root);
-    },
-  });
-}
-
-function fallbackDirectoryForLibraryId(libraryId: string): string | undefined {
-  const entries = readRecentLibraryEntries(recentLibraryPath(), (error) => {
-    logger?.error("recent-library.read", error);
-  });
-  const match = entries.find((entry) => entry.libraryId === libraryId);
-  if (match?.path) return path.dirname(path.resolve(match.path));
-  const active = readActiveLibraryPath(recentLibraryPath(), (error) => {
-    logger?.error("recent-library.read", error);
-  });
-  return active ? path.dirname(path.resolve(active)) : undefined;
 }
 
 async function sweepOrphanExternalLibraryStagingOnStartup(): Promise<void> {
@@ -1200,13 +573,6 @@ async function sweepOrphanExternalLibraryStagingOnStartup(): Promise<void> {
   }
 }
 
-// Pending import libraryId (importId -> libraryId), for auto-analyze after import.
-const pendingImportLibraries = new Map<string, string>();
-
-// Pending drop/paste collection destinations survive the conflict dialog. The
-// actual import is already durable in Worker staging before Main stores this.
-const pendingImportCollections = new Map<string, string>();
-
 type StoredImageSequenceOffer = ImageSequenceImportOffer;
 
 const pendingImageSequenceOffers = new Map<
@@ -1217,41 +583,6 @@ const pendingImageSequenceOffers = new Map<
     nextSequenceIndex: number;
   }
 >();
-
-function rememberImageSequenceOffer(
-  offer: StoredImageSequenceOffer,
-): StoredImageSequenceOffer {
-  const offerId = randomUUID();
-  pendingImageSequenceOffers.set(offerId, {
-    offer,
-    expiresAt: Date.now() + 10 * 60_000,
-    nextSequenceIndex: 0,
-  });
-  for (const [id, entry] of pendingImageSequenceOffers) {
-    if (entry.expiresAt <= Date.now()) pendingImageSequenceOffers.delete(id);
-  }
-  return {
-    defaultFps: offer.defaultFps,
-    libraryId: offer.libraryId,
-    offerId,
-    sequences: offer.sequences.map((sequence) => ({
-      displayName: sequence.displayName,
-      extension: sequence.extension,
-      firstFrame: sequence.firstFrame,
-      frameCount: sequence.frameCount,
-      height: sequence.height,
-      lastFrame: sequence.lastFrame,
-      numberStyle: sequence.numberStyle,
-      numericWidth: sequence.numericWidth,
-      prefix: sequence.prefix,
-      width: sequence.width,
-    })),
-    ...(offer.targetFolderId ? { targetFolderId: offer.targetFolderId } : {}),
-    ...(offer.targetCollectionId
-      ? { targetCollectionId: offer.targetCollectionId }
-      : {}),
-  };
-}
 
 // ── AI Config ────────────────────────────────────────────────────────────
 
@@ -1343,10 +674,6 @@ function readSyncServers(): SyncServerRecord[] {
   return [];
 }
 
-function writeSyncServers(servers: SyncServerRecord[]): void {
-  writeFileSync(syncServersPath(), JSON.stringify(servers, null, 2), "utf-8");
-}
-
 function readSyncBindings(): Record<string, SyncBindingRecord> {
   try {
     const parsed = JSON.parse(readFileSync(syncBindingsPath(), "utf-8")) as unknown;
@@ -1359,76 +686,6 @@ function readSyncBindings(): Record<string, SyncBindingRecord> {
 
 function writeSyncBindings(bindings: Record<string, SyncBindingRecord>): void {
   writeFileSync(syncBindingsPath(), JSON.stringify(bindings, null, 2), "utf-8");
-}
-
-function embeddingModelsPath(): string {
-  return path.join(app.getPath("userData"), "embedding-models.json");
-}
-
-function readEmbeddingModels(): unknown {
-  try {
-    return JSON.parse(readFileSync(embeddingModelsPath(), "utf-8")) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function writeEmbeddingModels(catalog: EmbeddingModelCatalog): void {
-  writeFileSync(embeddingModelsPath(), JSON.stringify(catalog, null, 2), "utf-8");
-}
-
-function embeddingServicesPath(): string {
-  return path.join(app.getPath("userData"), "embedding-services.json");
-}
-
-function readEmbeddingServices(): unknown {
-  try {
-    return JSON.parse(readFileSync(embeddingServicesPath(), "utf-8")) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function writeEmbeddingServices(catalog: EmbeddingServiceCatalog): void {
-  writeFileSync(embeddingServicesPath(), JSON.stringify(catalog, null, 2), "utf-8");
-}
-
-function embeddingBindingsPath(): string {
-  return path.join(app.getPath("userData"), "embedding-library-bindings.json");
-}
-
-function readEmbeddingBindings(): Record<string, EmbeddingLibraryBinding> {
-  try {
-    return parseEmbeddingBindings(JSON.parse(readFileSync(embeddingBindingsPath(), "utf-8")) as unknown);
-  } catch {
-    return {};
-  }
-}
-
-function writeEmbeddingBindings(bindings: Record<string, EmbeddingLibraryBinding>): void {
-  writeFileSync(embeddingBindingsPath(), JSON.stringify(bindings, null, 2), "utf-8");
-}
-
-function embeddingServiceKeyPath(id: string): string {
-  return path.join(app.getPath("userData"), "embedding-service-keys", `${id}.bin`);
-}
-
-function readEmbeddingServiceKey(id: string): string | null {
-  try {
-    return safeStorage.decryptString(readFileSync(embeddingServiceKeyPath(id)));
-  } catch {
-    return null;
-  }
-}
-
-function writeEmbeddingServiceKey(id: string, apiKey: string): void {
-  const filePath = embeddingServiceKeyPath(id);
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, safeStorage.encryptString(apiKey));
-}
-
-function deleteEmbeddingServiceKey(id: string): void {
-  rmSync(embeddingServiceKeyPath(id), { force: true });
 }
 
 function resolveSyncServerCredentials(serverId: string): {
@@ -1493,19 +750,6 @@ function aiProfileTransactionIo(): AiProfileTransactionIo {
 
 function recoverAiProfileTransactionIfPresent(): void {
   recoverAiProfileTransactionFromJournal(aiProfileTransactionIo());
-}
-
-function commitAiProfileCatalogTransaction(
-  profileId: string,
-  catalog: AiProfileCatalog,
-  credential: AiProfileCredentialMutation,
-): void {
-  commitAiProfileTransactionToJournal({
-    version: 1,
-    profileId,
-    credential,
-    catalog,
-  }, aiProfileTransactionIo());
 }
 
 function readAiAnalysisPreferences(): AiAnalysisPreferences {
@@ -1669,65 +913,6 @@ function loadAiConfig(): AiConfig & {
     throw new AiProfileStorageError(error);
   }
 }
-
-function saveAiConfig(config: AiConfig): void {
-  ensureAiProfileMigration();
-  const preferences: AiAnalysisPreferences = {
-    descriptionEnabled: config.descriptionEnabled,
-    tagEnabled: config.tagEnabled,
-    ratingEnabled: config.ratingEnabled,
-    analysisSettings: config.analysisSettings,
-    concurrencyLimit: config.concurrencyLimit,
-    maxAnalysisImageEdgePx: config.maxAnalysisImageEdgePx,
-    reliabilitySettings: config.reliabilitySettings,
-    languages: config.languages,
-    autoAnalyzeEnabled: config.autoAnalyzeEnabled,
-    disclaimerAccepted: config.disclaimerAccepted,
-  };
-  writeAtomicJsonFile(aiAnalysisSettingsPath(), JSON.stringify(preferences, null, 2));
-}
-
-function saveAiConnectionProfile(
-  draft: AiConnectionProfileDraft & { apiKey?: string; clearCredential?: boolean },
-): string {
-  ensureAiProfileMigration();
-  const catalog = readAiProfileCatalog();
-  const profileId = draft.id ?? createAiProfileId();
-  const next = saveAiProfileInCatalog(catalog, { ...draft, id: profileId });
-  const key = draft.apiKey?.trim();
-  let credential: AiProfileCredentialMutation = { kind: "preserve" };
-  if (key) {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("Secure credential storage is unavailable.");
-    }
-    credential = {
-      kind: "write",
-      encryptedCredentialBase64: safeStorage.encryptString(key).toString("base64"),
-    };
-  } else if (draft.clearCredential) {
-    credential = { kind: "delete" };
-  }
-  commitAiProfileCatalogTransaction(profileId, next, credential);
-  return profileId;
-}
-
-function activateAiConnectionProfile(profileId: string): void {
-  ensureAiProfileMigration();
-  if (!hasAiProfileCredential(profileId)) {
-    throw new AiProfileValidationError("AI profile has no saved credential.");
-  }
-  readAiProfileCredential(profileId);
-  const next = activateAiProfile(readAiProfileCatalog(), profileId);
-  commitAiProfileCatalogTransaction(profileId, next, { kind: "preserve" });
-}
-
-function deleteAiConnectionProfile(profileId: string): void {
-  ensureAiProfileMigration();
-  const catalog = readAiProfileCatalog();
-  const next = deleteAiProfile(catalog, profileId);
-  commitAiProfileCatalogTransaction(profileId, next, { kind: "delete" });
-}
-
 function getDecryptedApiKey(): string {
   const activeProfileId = loadAiConfig().activeProfileId;
   return resolveAiCredential(
@@ -1769,1182 +954,47 @@ function getDecryptedProfileApiKey(profileId: string): string {
   }
 }
 
-function focusMainWindow(): boolean {
-  return focusSerpentWindow(
-    mainWindow && !mainWindow.isDestroyed() ? mainWindow.id : undefined,
-  );
-}
-
 let loopbackRelease: Promise<void> | undefined;
 
 function releaseLoopbackListeners(): Promise<void> {
   if (loopbackRelease !== undefined) return loopbackRelease;
-  try {
-    extensionServer?.server.close();
-  } catch (error) {
-    logger?.error("extension-server", error);
-  }
-  extensionServer = undefined;
-  const mcpClose = embeddedMcpServer?.close() ?? Promise.resolve();
-  loopbackRelease = mcpClose.catch((error: unknown) => {
-    logger?.error("automation.mcp.close", error);
+  const apiClose = httpApiServer?.close() ?? Promise.resolve();
+  httpApiServer = undefined;
+  loopbackRelease = apiClose.catch((error: unknown) => {
+    logger?.error("http-api.close", error);
   });
   return loopbackRelease;
 }
 
-function beginUpdateHandoff(): void {
-  if (updateHandoff) return;
-  updateHandoff = true;
-  applicationQuitting = true;
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.hide();
-  }
-  if (process.platform === "darwin") app.hide();
-  void releaseLoopbackListeners();
-  const exitTimer = setTimeout(() => {
-    app.exit(0);
-  }, UPDATE_HANDOFF_EXIT_MS);
-  exitTimer.unref();
+
+function publishProgress(_event: unknown): void {
+  // Headless: UI progress push is gone; jobs are observable via job.* commands.
 }
 
-function suppressWindowDuringUpdateHandoff(window: BrowserWindow): void {
-  if (shouldHandleSecondaryLaunch({ updateHandoff, applicationQuitting })) return;
-  if (!window.isDestroyed()) window.hide();
-  window.once("ready-to-show", () => {
-    if (
-      !window.isDestroyed()
-      && !shouldHandleSecondaryLaunch({ updateHandoff, applicationQuitting })
-    ) {
-      window.hide();
-    }
-  });
+function publishAiProgress(_event: unknown): void {
+  // Headless: UI progress push is gone; AI results land in worker metadata.
 }
 
-function startupPreferencesPath(): string {
-  return startupPreferencesFilePath(app.getPath("userData"));
+function publishAiCompleted(_event: unknown): void {
+  // Headless: UI progress push is gone; AI results land in worker metadata.
 }
 
-function shortcutBindingsPath(): string {
-  return shortcutBindingsFilePath(app.getPath("userData"));
+function publishAiCleared(_event: unknown): void {
+  // Headless: UI progress push is gone.
 }
 
-function readShortcutBindingsSnapshot() {
-  return readShortcutBindings(shortcutBindingsPath());
-}
-
-async function exportShortcutBindingsFile(): Promise<ShortcutFileExportResult> {
-  const copy = resolveNativeDialogCopy(appLocale, "exportShortcuts");
-  try {
-    const e2ePath =
-      process.env.SERPENT_E2E === "1"
-        ? process.env.SERPENT_E2E_SHORTCUTS_EXPORT_PATH
-        : undefined;
-    let filePath = e2ePath;
-    if (!filePath) {
-      const options: Electron.SaveDialogOptions = {
-        title: copy.title,
-        buttonLabel: copy.buttonLabel,
-        defaultPath: "serpent-shortcuts.json",
-        filters: [{ name: copy.filterName ?? "JSON", extensions: ["json"] }],
-      };
-      const result = mainWindow
-        ? await dialog.showSaveDialog(mainWindow, options)
-        : await dialog.showSaveDialog(options);
-      if (result.canceled || !result.filePath) {
-        return { ok: false, error: "canceled", canceled: true };
-      }
-      filePath = result.filePath;
-    }
-    const bindings = readShortcutBindingsSnapshot();
-    writeFileSync(filePath, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");
-    return { ok: true, path: filePath };
-  } catch (error) {
-    logger?.error("shortcuts.export", error);
-    return { ok: false, error: "shortcut-export-failed" };
-  } finally {
-    ensureRendererKeyboardFocus(mainWindow, {
-      reattachHwnd: true,
-      reason: "shortcuts.export",
-    });
-  }
-}
-
-async function importShortcutBindingsFile(): Promise<ShortcutFileImportResult> {
-  const copy = resolveNativeDialogCopy(appLocale, "importShortcuts");
-  try {
-    const e2ePath =
-      process.env.SERPENT_E2E === "1"
-        ? process.env.SERPENT_E2E_SHORTCUTS_IMPORT_PATH
-        : undefined;
-    let selected = e2ePath;
-    if (!selected) {
-      const options: Electron.OpenDialogOptions = {
-        title: copy.title,
-        buttonLabel: copy.buttonLabel,
-        properties: ["openFile"],
-        filters: [{ name: copy.filterName ?? "JSON", extensions: ["json"] }],
-      };
-      const result = mainWindow
-        ? await dialog.showOpenDialog(mainWindow, options)
-        : await dialog.showOpenDialog(options);
-      selected = result.filePaths[0];
-      if (result.canceled || !selected) {
-        return { ok: false, error: "canceled", canceled: true };
-      }
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(selected, "utf8"));
-    } catch {
-      return { ok: false, error: "invalid-shortcut-file" };
-    }
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      (parsed as { version?: unknown }).version !== 1 ||
-      !(parsed as { platforms?: unknown }).platforms ||
-      typeof (parsed as { platforms?: unknown }).platforms !== "object" ||
-      Array.isArray((parsed as { platforms?: unknown }).platforms)
-    ) {
-      return { ok: false, error: "invalid-shortcut-file" };
-    }
-    const imported = parseShortcutBindings(parsed);
-    const platform = shortcutPlatformFromProcess(process.platform);
-    const validation = validateShortcutBindings(imported, platform);
-    if (validation !== null) return { ok: false, error: validation };
-    // Import only the current platform; the other platform's local settings
-    // are preserved when a backup moves between Windows and macOS.
-    const bindings = withPlatformBindings(
-      readShortcutBindingsSnapshot(),
-      platform,
-      imported.platforms[platform],
-    );
-    writeShortcutBindings(shortcutBindingsPath(), bindings);
-    installApplicationMenu({
-      locale: appLocale,
-      recentLibraries: nativeMenuRecentLibraries(),
-      shortcutBindings: bindings,
-    });
-    return { ok: true, bindings };
-  } catch (error) {
-    logger?.error("shortcuts.import", error);
-    return { ok: false, error: "shortcut-import-failed" };
-  } finally {
-    ensureRendererKeyboardFocus(mainWindow, {
-      reattachHwnd: true,
-      reason: "shortcuts.import",
-    });
-  }
-}
-
-function storeShortcutBindings(input: unknown): ShortcutBindingsSetResult {
-  const current = readShortcutBindingsSnapshot();
-  const platform = shortcutPlatformFromProcess(process.platform);
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { ok: false, bindings: current, error: "invalid-shortcut-request" };
-  }
-  const record = input as { platform?: unknown; bindings?: unknown };
-  if (record.platform !== platform) {
-    return { ok: false, bindings: current, error: "invalid-shortcut-platform" };
-  }
-  if (
-    !record.bindings ||
-    typeof record.bindings !== "object" ||
-    Array.isArray(record.bindings)
-  ) {
-    return { ok: false, bindings: current, error: "invalid-shortcut-bindings" };
-  }
-
-  const next: Record<string, ShortcutOverride> = {};
-  for (const [actionId, value] of Object.entries(
-    record.bindings as Record<string, unknown>,
-  )) {
-    if (value === null) {
-      next[actionId] = null;
-      continue;
-    }
-    const chord = parseShortcutChord(value);
-    if (!chord) {
-      return { ok: false, bindings: current, error: "invalid-shortcut-chord" };
-    }
-    const action = findShortcutAction(actionId);
-    if (action?.customizable === false) {
-      return { ok: false, bindings: current, error: "shortcut-fixed" };
-    }
-    if (action) {
-      const reason = validateShortcutChord(chord, platform, action.scopes, actionId);
-      if (reason !== null) {
-        return { ok: false, bindings: current, error: "invalid-shortcut-chord" };
-      }
-    } else if (!Object.prototype.hasOwnProperty.call(current.platforms[platform], actionId)) {
-      // Unknown ids are not accepted from a fresh renderer payload; existing
-      // unknown entries are merged below so a downgrade does not lose data.
-      continue;
-    }
-    next[actionId] = chord;
-  }
-  for (const [actionId, value] of Object.entries(current.platforms[platform])) {
-    if (!(actionId in next) && !findShortcutAction(actionId)) {
-      next[actionId] = value;
-    }
-  }
-
-  const candidate = withPlatformBindings(current, platform, next);
-  if (findAllShortcutConflicts(platform, candidate).length > 0) {
-    return { ok: false, bindings: current, error: "shortcut-conflict" };
-  }
-  writeShortcutBindings(shortcutBindingsPath(), candidate);
-  installApplicationMenu({
-    locale: appLocale,
-    recentLibraries: nativeMenuRecentLibraries(),
-    shortcutBindings: candidate,
-  });
-  return { ok: true, bindings: candidate };
-}
-
-function getOSLoginItemState(): {
-  openAtLogin: boolean;
-  executableWillLaunchAtLogin?: boolean;
-  status?: string;
-} {
-  const state = app.getLoginItemSettings(
-    process.platform === "win32" ? { args: [] } : undefined,
-  );
-  return {
-    openAtLogin: state.openAtLogin,
-    ...(process.platform === "win32"
-      ? { executableWillLaunchAtLogin: state.executableWillLaunchAtLogin }
-      : { status: state.status }),
-  };
-}
-
-function readStartupPreferencesSnapshot(): StartupPreferencesSnapshot {
-  const preferences = readStartupPreferences(startupPreferencesPath());
-  return createStartupPreferencesSnapshot({
-    platform: process.platform,
-    packaged: app.isPackaged,
-    e2e: process.env.SERPENT_E2E === "1",
-    preferences,
-    getLoginItemState: getOSLoginItemState,
-    onReadError: (error) => logger?.error("startup.login-item", error),
-  });
-}
-
-function storeStartupPreferences(input: unknown): StartupPreferencesSnapshot {
-  const current = readStartupPreferences(startupPreferencesPath());
-  const record = typeof input === "object" && input !== null ? input as {
-    openAtLogin?: unknown;
-  } : {};
-  const preferences: StartupPreferences = {
-    version: 1,
-    openAtLogin: typeof record.openAtLogin === "boolean" ? record.openAtLogin : current.openAtLogin,
-  };
-  const snapshot = applyStartupLoginItem({
-    platform: process.platform,
-    packaged: app.isPackaged,
-    e2e: process.env.SERPENT_E2E === "1",
-    preferences,
-    setLoginItemSettings: (settings) => {
-      app.setLoginItemSettings({
-        openAtLogin: settings.openAtLogin,
-        ...(settings.args === undefined ? {} : { args: [...settings.args] }),
-        ...(settings.enabled === undefined ? {} : { enabled: settings.enabled }),
-      });
-    },
-    getLoginItemState: getOSLoginItemState,
-  });
-  if (!snapshot.registrationFailed) {
-    writeStartupPreferences(startupPreferencesPath(), preferences);
-  }
-  return snapshot;
-}
-
-function handleSecondInstance(): void {
-  if (!shouldHandleSecondaryLaunch({ updateHandoff, applicationQuitting })) return;
-  if (
-    MAIN_WINDOW_VITE_DEV_SERVER_URL &&
-    mainWindow &&
-    !mainWindow.isDestroyed()
-  ) {
-    void loadRendererDevUrl(
-      mainWindow,
-      MAIN_WINDOW_VITE_DEV_SERVER_URL,
-    ).finally(() => focusMainWindow());
-    return;
-  }
-  focusMainWindow();
-}
-
-function focusSerpentWindow(windowId?: number): boolean {
-  if (!shouldHandleSecondaryLaunch({ updateHandoff, applicationQuitting })) return false;
-  const target =
-    windowId === undefined
-      ? mainWindow
-      : BrowserWindow.getAllWindows().find((window) => window.id === windowId);
-  if (!target || target.isDestroyed()) return false;
-  if (target.isMinimized()) target.restore();
-  target.show();
-  target.focus();
-  return true;
-}
-
-/**
- * Isolated-session placement for `SERPENT_E2E_ISOLATED=1`: real E2E must keep
- * real `show()`/focus semantics (an earlier `showInactive` attempt broke
- * keyboard/focus tests and was reverted — see
- * docs/internal/development/2026-07-19-e2e-isolated-session-development-log.md), so
- * this only changes *where* the window appears, never how it is shown.
- * When a non-primary display exists, the window is placed fully within it;
- * on a single-display Mac there is no isolation available yet and the
- * window falls back to the primary display (logged, not silent).
- */
-function resolveE2eIsolatedPlacement(
-  defaultSize: { width: number; height: number },
-): { x: number; y: number; width: number; height: number } | undefined {
-  if (process.env.SERPENT_E2E_ISOLATED !== "1") return undefined;
-
-  const displays = screen.getAllDisplays().map((display) => ({
-    id: display.id,
-    bounds: display.bounds,
-  }));
-  const primaryDisplayId = screen.getPrimaryDisplay().id;
-  const placement = pickIsolatedWindowPlacement(
-    displays,
-    primaryDisplayId,
-    defaultSize,
-  );
-
-  if (placement) {
-    logger?.info(
-      "e2e.isolated-window",
-      "Placing the E2E window on a secondary display so it does not steal foreground focus.",
-      { ...placement },
-    );
-    return placement;
-  }
-
-  logger?.info(
-    "e2e.isolated-window",
-    "SERPENT_E2E_ISOLATED=1 was set but no secondary display was detected; " +
-      "falling back to the primary display. The E2E window will steal " +
-      "foreground focus on this machine (documented limitation of Serpent-a1b).",
-    { displayCount: displays.length },
-  );
-  return undefined;
-}
-
-const DEV_SERVER_WAIT_MS = 60_000;
-const DEV_SERVER_POLL_MS = 250;
-const DEV_RENDERER_MOUNT_TIMEOUT_MS = 20_000;
-const DEV_RENDERER_LOAD_ATTEMPTS = 4;
-
-async function waitForDevServer(url: string): Promise<void> {
-  const deadline = Date.now() + DEV_SERVER_WAIT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
-      if (response.ok) return;
-    } catch {
-      // Vite may still be binding; keep polling until the deadline.
-    }
-    await new Promise((resolve) => setTimeout(resolve, DEV_SERVER_POLL_MS));
-  }
-  throw new Error(
-    `Renderer dev server did not become reachable within ${DEV_SERVER_WAIT_MS}ms: ${url}`,
-  );
-}
-
-async function isRendererMounted(
-  webContents: Electron.WebContents,
-): Promise<boolean> {
-  try {
-    return await webContents.executeJavaScript(
-      "Boolean(document.querySelector('#root .app-shell'))",
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function waitForRendererMounted(
-  webContents: Electron.WebContents,
-  timeoutMs = DEV_RENDERER_MOUNT_TIMEOUT_MS,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await isRendererMounted(webContents)) return true;
-    await new Promise((resolve) => setTimeout(resolve, DEV_SERVER_POLL_MS));
-  }
-  return false;
-}
-
-async function loadRendererDevUrl(
-  window: BrowserWindow,
-  url: string,
-): Promise<void> {
-  for (let attempt = 1; attempt <= DEV_RENDERER_LOAD_ATTEMPTS; attempt++) {
-    try {
-      await waitForDevServer(url);
-      await window.loadURL(url);
-    } catch (error) {
-      logger?.error("main.window.load-attempt", error, { attempt, url });
-      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
-      continue;
-    }
-    if (await waitForRendererMounted(window.webContents)) {
-      logger?.info("main.window.mount-verified", "Renderer shell visible.", {
-        attempt,
-        url,
-      });
-      return;
-    }
-    logger?.info(
-      "main.window.mount-retry",
-      "Renderer still blank after load; retrying.",
-      { attempt, url },
-    );
-    await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
-  }
-  logger?.error(
-    "main.window.mount-failed",
-    new Error("Renderer remained blank after dev load retries."),
-    { url, attempts: DEV_RENDERER_LOAD_ATTEMPTS },
-  );
-  throw new Error(`Renderer remained blank after dev load retries: ${url}`);
-}
-
-function attachRendererDiagnostics(window: BrowserWindow): void {
-  window.webContents.on(
-    "console-message",
-    (_event, level, message, line, sourceId) => {
-      logRendererConsoleMessage(logger, level, message, line, sourceId);
-    },
-  );
-  window.webContents.on("render-process-gone", (_event, details) => {
-    logRendererProcessGone(logger, window.id, details);
-  });
-  window.webContents.on("unresponsive", () => {
-    logRendererUnresponsive(logger, window.id);
-  });
-  window.webContents.on("responsive", () => {
-    logRendererResponsive(logger, window.id);
-  });
-}
-
-async function createMainWindow(): Promise<void> {
-  const defaultWidth = 1440;
-  const defaultHeight = 900;
-  const isolatedPlacement = resolveE2eIsolatedPlacement({
-    width: defaultWidth,
-    height: defaultHeight,
-  });
-
-  const devIcon = appIconImage();
-  // Serpent-tluf: the macOS dock otherwise shows the default Electron icon
-  // in dev builds (packaged apps ship the real .icns).
-  if (process.platform === "darwin" && devIcon) {
-    app.dock?.setIcon(devIcon);
-  }
-
-  const linuxRoundedCorners = shouldUseLinuxRoundedCorners();
-  const window = new BrowserWindow({
-    width: isolatedPlacement?.width ?? defaultWidth,
-    height: isolatedPlacement?.height ?? defaultHeight,
-    ...(isolatedPlacement
-      ? { x: isolatedPlacement.x, y: isolatedPlacement.y }
-      : {}),
-    minWidth: 1040,
-    minHeight: 680,
-    show: false,
-    backgroundColor: "#111417",
-    ...(devIcon ? { icon: devIcon } : {}),
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 14, y: 16 },
-        }
-      : shouldUseFramelessTitleBar(process.platform)
-        ? {
-            // Serpent-znex: hide system title bar; renderer draws caption buttons.
-            titleBarStyle: "hidden" as const,
-          }
-        : {}),
-    ...(linuxRoundedCorners ? linuxRoundedWindowOptions() : {}),
-    webPreferences: {
-      preload: path.join(__dirname, "index.js"),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  mainWindow = window;
-  if (linuxRoundedCorners) attachLinuxRoundedCorners(window);
-  const mainContentsId = window.webContents.id;
-  // Keep renderer diagnostics active in both development and packaged builds.
-  // A blank window in a packaged build must leave the same evidence as one
-  // started from Vite; idle windows produce no log entries.
-  attachRendererDiagnostics(window);
-  window.on("ready-to-show", () => {
-    // E2E can keep its renderer fully loaded and automatable without putting
-    // a test window over the user's desktop session. An update handoff stays
-    // hidden so a second launch cannot flash a window.
-    const e2eShowInactive = process.env.SERPENT_E2E === "1"
-      && process.env.SERPENT_E2E_SHOW_INACTIVE === "1";
-    if (shouldShowMainWindowOnReady({
-      updateHandoff,
-      applicationQuitting,
-      e2eHideWindow: process.env.SERPENT_E2E === "1"
-        && process.env.SERPENT_E2E_HIDE_WINDOW === "1"
-        && !e2eShowInactive,
-    })) {
-      if (e2eShowInactive) window.showInactive();
-      else window.show();
-    }
-  });
-  // Cleanup while webContents/HWND still exist (`closed` is too late).
-  window.on("close", () => {
-    clearViewerVideoShortcutCapture(mainContentsId);
-  });
-  window.on("closed", () => {
-    if (mainWindow === window) {
-      focusedContexts.delete(window.id);
-      mainWindow = undefined;
-    }
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
-  window.webContents.session.on("will-download", (event, item) => {
-    if (item.getURL().startsWith("serpent-plugin:")) event.preventDefault();
-  });
-  // VIEWER-018: letter keys under CJK IME — Menu accelerators + IMM32 suspend
-  // are primary on Windows; before-input remains a cross-platform fallback.
-  window.webContents.on("before-input-event", (event, input) => {
-    if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
-    const captureType = input.type === 'keyUp' ? 'keyup' : 'keydown';
-    const captureResult = pluginInputCaptureBroker?.publish({
-      target: { scope: 'application' },
-      event: {
-        type: captureType,
-        timestamp: Date.now(),
-        key: input.key,
-        code: input.code,
-        repeat: input.isAutoRepeat,
-        altKey: input.alt,
-        ctrlKey: input.control,
-        metaKey: input.meta,
-        shiftKey: input.shift,
-        isComposing: input.isComposing,
-      },
-    });
-    if (captureResult === 'delivered' || captureResult === 'queued') {
-      event.preventDefault();
-      return;
-    }
-    if (shouldHideApplicationMenuBar(process.platform)) {
-      const appAction = input.type === "keyDown"
-        ? matchWindowsApplicationShortcut({
-            key: input.key,
-            code: input.code,
-            keyCode: (input as { keyCode?: number }).keyCode,
-            control: input.control,
-            meta: input.meta,
-            alt: input.alt,
-            shift: input.shift,
-            isAutoRepeat: input.isAutoRepeat,
-          })
-        : null;
-      const repeatedAppAction = input.type === "keyDown" && input.isAutoRepeat
-        ? isWindowsApplicationShortcut({
-            key: input.key,
-            code: input.code,
-            keyCode: (input as { keyCode?: number }).keyCode,
-            control: input.control,
-            meta: input.meta,
-            alt: input.alt,
-            shift: input.shift,
-          })
-        : false;
-      if (appAction || repeatedAppAction) {
-        event.preventDefault();
-        if (appAction) forwardApplicationShortcutToWindow(window, appAction);
-        return;
-      }
-      const browseInput = {
-        type: input.type,
-        code: input.code,
-        key: input.key,
-        keyCode: (input as { keyCode?: number }).keyCode,
-        control: input.control,
-        meta: input.meta,
-        alt: input.alt,
-        shift: input.shift,
-      };
-      const browseAction = matchBrowseKeyboardShortcut(browseInput, {
-        bindings: readShortcutBindingsSnapshot(),
-        platform: shortcutPlatformFromProcess(process.platform),
-      });
-      if (browseAction) {
-        if (browseAction === "copy-path") {
-          event.preventDefault();
-          forwardBrowseShortcut(window.webContents, browseAction, {
-            key: input.key,
-            code: input.code,
-            ctrlKey: input.control,
-            metaKey: input.meta,
-            altKey: input.alt,
-            shiftKey: input.shift,
-          });
-        } else {
-          forwardBrowseShortcut(window.webContents, browseAction);
-        }
-      }
-    }
-    if (!isViewerVideoShortcutContentsActive(window.webContents.id)) {
-      return;
-    }
-    const viewerScope = viewerShortcutScopeForContents(window.webContents.id);
-    if (viewerScope === null) return;
-    const viewerInput = {
-      type: input.type,
-      code: input.code,
-      key: input.key,
-      keyCode: (input as { keyCode?: number }).keyCode,
-      control: input.control,
-      meta: input.meta,
-      alt: input.alt,
-      shift: input.shift,
-      isAutoRepeat: input.isAutoRepeat,
-    };
-    const bindings = readShortcutBindingsSnapshot();
-    const platform = shortcutPlatformFromProcess(process.platform);
-    const action = matchViewerVideoLetterShortcut(
-      viewerInput,
-      bindings,
-      platform,
-      viewerScope,
-    );
-    const repeatedViewerAction = input.type === "keyDown" && input.isAutoRepeat
-      ? matchViewerVideoLetterShortcut(
-        { ...viewerInput, isAutoRepeat: false },
-        bindings,
-        platform,
-        viewerScope,
-      )
-      : null;
-    if (!action && !repeatedViewerAction) return;
-    event.preventDefault();
-    const forward = viewerShortcutRepeatForward(action, repeatedViewerAction);
-    if (forward) {
-      forwardViewerVideoShortcut(window.webContents, forward.action, {
-        repeat: forward.repeat,
-      });
-    }
-  });
-  // Defense in depth (Serpent-46i9): even if a page-zoom accelerator sneaks
-  // back into the menu, Chromium must not rescale the whole UI.
-  void window.webContents.setVisualZoomLevelLimits(1, 1);
-  // Serpent-znex: keep caption maximize/restore glyph in sync on Windows.
-  if (shouldUseFramelessTitleBar(process.platform)) {
-    bindWindowMaximizedEvents(window);
-  }
-  // macOS three-finger swipe (requires Trackpad → Swipe between pages).
-  // Event is on BrowserWindow, not webContents.
-  window.on("swipe", (_event, direction) => {
-    sendToLiveWebContents(window.webContents, SHELL_SWIPE_CHANNEL, direction);
-  });
-
-  const publishWindowFocus = () => {
-    if (window.isDestroyed()) return;
-    if (window.isFocused()) {
-      lastExtensionTargetWindowId = window.id;
-    }
-    sendToLiveWebContents(window.webContents, WINDOW_FOCUS_CHANNEL, {
-      focused: window.isFocused(),
-    });
-  };
-  window.on("focus", publishWindowFocus);
-  window.on("blur", () => {
-    pluginInputCaptureBroker?.releaseForWindowBlur();
-    publishWindowFocus();
-  });
-  window.once("ready-to-show", publishWindowFocus);
-  window.webContents.once("did-finish-load", () => {
-    publishPluginInputCaptureSessionsToRenderer();
-    if (pendingPluginDeviceStateRecoveryNotice) {
-      pendingPluginDeviceStateRecoveryNotice = false;
-      window.webContents.send(SHELL_NOTIFY_CHANNEL, {
-        severity: 'warning',
-        mode: 'toast',
-        message: '插件授权设置已重置，原设置已备份；如需使用插件，请重新授权。',
-      });
-    }
-  });
-
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-      if (errorCode === -3) return; // aborted
-      const detail = [
-        `Failed to load renderer (${errorCode}): ${errorDescription}`,
-        validatedURL ? `URL: ${validatedURL}` : null,
-        "If the window is black after npm start, a Vite port conflict is likely.",
-        "Use `npm start` (auto free port) or free the process on 5173.",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      logger?.error("main.window.load", detail);
-      dialog.showErrorBox("Serpent renderer failed to load", detail);
-    });
-    try {
-      await loadRendererDevUrl(window, MAIN_WINDOW_VITE_DEV_SERVER_URL);
-    } catch (error) {
-      logger?.error("main.window.dev-load", error);
-      dialog.showErrorBox(
-        "Serpent renderer failed to load",
-        error instanceof Error ? error.message : String(error),
-      );
-      throw error;
-    }
-  } else {
-    await window.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
-}
-
-function cancelled(): RendererResult {
-  return { ok: false, error: createPublicError("CANCELLED") };
-}
-
-function isLibraryOpenRequest(request: RendererRequest): boolean {
-  return request.type === "library.create.request"
-    || request.type === "library.open.request"
-    || request.type === "library.open-recent.request"
-    || request.type === "library.open-eagle.request"
-    || request.type === "library.open-billfish.request";
-}
-
-function getExtensionSaveRouting() {
-  const focusedWindow = BrowserWindow.getFocusedWindow();
-  return resolveExtensionSaveRouting({
-    focusedWindowId: focusedWindow?.id ?? null,
-    contexts: focusedContexts,
-    lastTargetWindowId: lastExtensionTargetWindowId ?? null,
-    mainWindowId:
-      mainWindow && !mainWindow.isDestroyed() ? mainWindow.id : null,
-  });
-}
-
-function getExtensionSaveContext() {
-  return getExtensionSaveRouting().context;
-}
-
-async function handleListFolders(): Promise<ListFoldersDisposition> {
-  if (!workerClient) {
-    return { ok: false, status: 503, reason: "worker unavailable" };
-  }
-
-  const saveContext = getExtensionSaveContext();
-  if (!saveContext) {
-    return { ok: false, status: 503, reason: "no active library" };
-  }
-
-  const result = await workerClient.request({
-    type: "folder.list",
-    libraryId: saveContext.libraryId,
-  });
-  if (!result.ok) {
-    return {
-      ok: false,
-      status: result.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
-      reason: result.error.reason ?? result.error.code,
-    };
-  }
-  if (result.type !== "folder.list") {
-    return { ok: false, status: 500, reason: "unexpected worker response" };
-  }
-
-  let libraryDisplayName = "Serpent";
-  const librariesResult = await workerClient.request({ type: "library.list" });
-  if (librariesResult.ok && librariesResult.type === "library.list") {
-    const match = librariesResult.libraries.find(
-      (library) => library.libraryId === saveContext.libraryId,
-    );
-    if (match?.displayName) libraryDisplayName = match.displayName;
-  }
-
-  // 链接文件夹与 managed 文件夹并列作为扩展保存目标：worker 的 folder.list
-  // 只列 managed，这里额外取 linked-folder.list 并按链接根 displayName 做
-  // 命名空间前缀，避免与 managed 的 relativePath 撞树（Serpent-f6f779）。
-  let linkedExtensionFolders: Array<{
-    folderId: string;
-    name: string;
-    relativePath: string;
-    assetCount: number;
-  }> = [];
-  const linkedResult = await workerClient.request({
-    type: "linked-folder.list",
-    libraryId: saveContext.libraryId,
-  });
-  if (linkedResult.ok && linkedResult.type === "linked-folder.list") {
-    const rootNames = new Map(
-      linkedResult.folders
-        .filter((folder) => (folder.relativePath ?? "") === "")
-        .map((folder) => [folder.folderId, folder.displayName]),
-    );
-    linkedExtensionFolders = linkedResult.folders.map((folder) => {
-      const rootName =
-        (folder.linkedFolderId
-          ? rootNames.get(folder.linkedFolderId)
-          : undefined) ?? folder.displayName;
-      return {
-        folderId: folder.folderId,
-        name: folder.displayName,
-        relativePath:
-          (folder.relativePath ?? "") === ""
-            ? rootName
-            : `${rootName}/${folder.relativePath}`,
-        assetCount: folder.assetCount,
-      };
-    });
-  }
-
-  return {
-    ok: true,
-    libraryDisplayName,
-    recentBrowsedFolderIds: (() => {
-      let ids = extensionBrowseFoldersStorePath
-        ? readExtensionBrowseFolderIds(
-            extensionBrowseFoldersStorePath,
-            saveContext.libraryId,
-          )
-        : [];
-      if (saveContext.selectedFolderId) {
-        ids = [
-          saveContext.selectedFolderId,
-          ...ids.filter((id) => id !== saveContext.selectedFolderId),
-        ];
-      }
-      return ids;
-    })(),
-    folders: [
-      ...result.folders.map((folder) => ({
-        folderId: folder.folderId,
-        name: folder.name,
-        relativePath: folder.relativePath,
-        assetCount: folder.directAssetCount,
-      })),
-      ...linkedExtensionFolders,
-    ],
-  };
-}
-
-async function handleListCollections(): Promise<ListCollectionsDisposition> {
-  if (!workerClient) {
-    return { ok: false, status: 503, reason: "worker unavailable" };
-  }
-
-  const saveContext = getExtensionSaveContext();
-  if (!saveContext) {
-    return { ok: false, status: 503, reason: "no active library" };
-  }
-
-  const result = await workerClient.request({
-    type: "collection.list",
-    libraryId: saveContext.libraryId,
-  });
-  if (!result.ok) {
-    return {
-      ok: false,
-      status: result.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
-      reason: result.error.reason ?? result.error.code,
-    };
-  }
-  if (result.type !== "collection.list") {
-    return { ok: false, status: 500, reason: "unexpected worker response" };
-  }
-
-  let libraryDisplayName = "Serpent";
-  const librariesResult = await workerClient.request({ type: "library.list" });
-  if (librariesResult.ok && librariesResult.type === "library.list") {
-    const match = librariesResult.libraries.find(
-      (library) => library.libraryId === saveContext.libraryId,
-    );
-    if (match?.displayName) libraryDisplayName = match.displayName;
-  }
-
-  return {
-    ok: true,
-    libraryDisplayName,
-    collections: extensionCollectionSummaries(result.collections),
-  };
-}
-
-async function handleSaveIntent(
-  intent: SaveIntent,
-): Promise<SaveIntentDisposition> {
-  if (!workerClient) {
-    return { accepted: false, status: 503, reason: "worker unavailable" };
-  }
-
-  const focusedWindow = BrowserWindow.getFocusedWindow();
-  const saveContext = getExtensionSaveContext();
-  if (!saveContext) {
-    logger?.info(
-      "extension-server.save",
-      focusedWindow
-        ? "No active library in focused window; dropping save intent."
-        : "No focused Serpent window and no fallback browse context; dropping save intent.",
-      {
-        focusedWindowId: focusedWindow?.id ?? null,
-        lastTargetWindowId: lastExtensionTargetWindowId ?? null,
-        mainWindowId:
-          mainWindow && !mainWindow.isDestroyed() ? mainWindow.id : null,
-        contextWindowCount: focusedContexts.size,
-      },
-    );
-    return { accepted: false, status: 503, reason: "no active library" };
-  }
-
-  const targetFolderId =
-    intent.targetFolderId !== undefined
-      ? intent.targetFolderId ?? undefined
-      : saveContext.selectedFolderId;
-
-  const command: WorkerCommand = {
-    type: "extension.save-from-url",
-    libraryId: saveContext.libraryId,
-    targetFolderId,
-    sourcePageUrl: intent.sourcePageUrl,
-    mediaUrl: intent.mediaUrl,
-    mediaType: intent.mediaType,
-  };
-
-  try {
-    const result = await workerClient.request(command);
-    if (!result.ok) {
-      logger?.error(
-        "extension-server.save",
-        new Error(`Save failed: ${result.error.message}`),
-        {
-          code: result.error.code,
-          reason: result.error.reason,
-        },
-      );
-      return {
-        accepted: false,
-        status: result.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
-        reason: result.error.reason ?? result.error.code,
-      };
-    }
-    logger?.info("extension-server.save", "Asset saved successfully.", {
-      type: result.type,
-    });
-    if (result.type === "extension.asset-saved") {
-      void enqueueAutoAnalyzeAfterImport(saveContext.libraryId, [
-        result.asset.assetId,
-      ]);
-    }
-    return { accepted: true };
-  } catch (error) {
-    logger?.error("extension-server.save", error);
-    throw error;
-  }
-}
-
-async function handleSaveUpload(
-  upload: SaveUploadRequest,
-): Promise<SaveUploadDisposition> {
-  if (!workerClient) {
-    return { accepted: false, status: 503, reason: "worker unavailable" };
-  }
-
-  const focusedWindow = BrowserWindow.getFocusedWindow();
-  const saveRouting = getExtensionSaveRouting();
-  const saveContext = saveRouting.context;
-  if (!saveContext) {
-    logger?.info(
-      "extension-server.save-upload",
-      focusedWindow
-        ? "No active library in focused window; dropping upload."
-        : "No focused Serpent window and no fallback browse context; dropping upload.",
-      {
-        focusedWindowId: focusedWindow?.id ?? null,
-        lastTargetWindowId: lastExtensionTargetWindowId ?? null,
-        mainWindowId:
-          mainWindow && !mainWindow.isDestroyed() ? mainWindow.id : null,
-        contextWindowCount: focusedContexts.size,
-      },
-    );
-    return { accepted: false, status: 503, reason: "no active library" };
-  }
-
-  const targetFolderId = upload.targetCollectionId
-    ? undefined
-    : upload.targetFolderId !== undefined
-      ? upload.targetFolderId ?? undefined
-      : saveContext.selectedFolderId;
-
-  const command: WorkerCommand = {
-    type: "extension.save-from-file",
-    libraryId: saveContext.libraryId,
-    targetFolderId,
-    sourcePageUrl: upload.sourcePageUrl,
-    mediaUrl: upload.mediaUrl,
-    stagedFilePath: upload.stagedFilePath,
-    contentType: upload.contentType,
-    filename: upload.filename,
-  };
-
-  try {
-    const result = await workerClient.request(command);
-    if (!result.ok) {
-      logger?.error(
-        "extension-server.save-upload",
-        new Error(`Upload save failed: ${result.error.message}`),
-        {
-          code: result.error.code,
-          reason: result.error.reason,
-        },
-      );
-      return {
-        accepted: false,
-        status: result.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
-        reason: result.error.reason ?? result.error.code,
-      };
-    }
-    if (result.type !== "extension.asset-saved") {
-      return { accepted: false, status: 500, reason: "unexpected worker response" };
-    }
-    if (upload.targetCollectionId) {
-      const added = await workerClient.request({
-        type: "collection.assets.add",
-        libraryId: saveContext.libraryId,
-        collectionId: upload.targetCollectionId,
-        assetIds: [result.asset.assetId],
-      });
-      if (!added.ok || added.type !== "collection.assets.added") {
-        const detail = added.ok
-          ? "unexpected worker response"
-          : added.error.reason ?? added.error.code;
-        return {
-          accepted: false,
-          status: !added.ok && added.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
-          reason: `未能加入合集：${detail}`,
-        };
-      }
-    }
-    logger?.info("extension-server.save-upload", "Asset saved successfully.", {
-      type: result.type,
-      byteLength: upload.byteLength,
-      assetId: result.asset.assetId,
-    });
-    if (upload.focusAppAfterSave) {
-      focusSerpentWindow(saveRouting.targetWindowId ?? undefined);
-    }
-    if (upload.revealInLibrary) {
-      publishExtensionSaveCompleted(saveRouting.targetWindowId, {
-        type: "extension.save.completed",
-        libraryId: saveContext.libraryId,
-        asset: result.asset,
-      });
-    }
-    void enqueueAutoAnalyzeAfterImport(saveContext.libraryId, [
-      result.asset.assetId,
-    ]);
-    return { accepted: true };
-  } catch (error) {
-    logger?.error("extension-server.save-upload", error);
-    throw error;
-  } finally {
-    try {
-      rmSync(upload.stagingDirectory, { recursive: true, force: true });
-    } catch (error) {
-      logger?.error("extension-server.save-upload-cleanup", error);
-    }
-  }
-}
-
-function publishLifecycle(event: RendererLifecycleEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(
-    LIBRARY_LIFECYCLE_CHANNEL,
-    parseRendererLifecycleEvent(event),
-  );
-}
-
-async function closeOpenLibrariesBeforeReplacement(): Promise<string[]> {
-  const previousPaths: string[] = [];
-  if (!workerClient) return previousPaths;
-  try {
-    const listed = await workerClient.request({ type: "library.list" });
-    if (!listed.ok || listed.type !== "library.list") return previousPaths;
-    for (const library of listed.libraries) {
-      previousPaths.push(library.libraryPath);
-      try {
-        const closed = await workerClient.request({
-          type: "library.close",
-          libraryId: library.libraryId,
-        });
-        if (!closed.ok || closed.type !== "library.closed") continue;
-        clearNativeAssetDragCache(library.libraryId);
-        clearActiveRecentLibrary(recentLibraryPath(), (error) => {
-          logger?.error("recent-library.clear", error);
-        });
-        publishLifecycle({
-          type: "library.closed",
-          libraryId: library.libraryId,
-        });
-      } catch (error) {
-        logger?.error("external-library-open.close-previous", error, {
-          libraryId: library.libraryId,
-        });
-      }
-    }
-  } catch (error) {
-    logger?.error("external-library-open.list-previous", error);
-  }
-  return previousPaths;
-}
-
-async function reopenLibrariesAfterFailedReplacement(
-  libraryPaths: readonly string[],
-): Promise<void> {
-  if (!workerClient || libraryPaths.length === 0) return;
-  for (const selectedLibraryPath of libraryPaths) {
-    try {
-      const opened = await workerClient.request({
-        type: "library.open",
-        selectedLibraryPath,
-      });
-      if (!opened.ok || opened.type !== "library.opened") continue;
-      publishLifecycle({
-        type: "library.opened",
-        library: {
-          libraryId: opened.library.libraryId,
-          displayName: opened.library.displayName,
-          displayPath: opened.library.libraryPath,
-        },
-        source: "replacement-restore",
-      });
-    } catch (error) {
-      logger?.error("external-library-open.restore-previous", error, {
-        selectedLibraryPath,
-      });
-    }
-  }
+function publishLifecycle(_event: unknown): void {
+  // Headless: lifecycle events have no renderer to notify; the HTTP API and
+  // journal carry state instead.
 }
 
 function publishAssetChange(event: AssetChangeEvent): void {
   const parsed = parseAssetChangeEvent(event);
   // Asset changes can invalidate a cached source path (delete, relink, move,
   // or replacement). Artifact-only library changes use the separate
-  // library.changed channel and do not evict the viewer's hot path.
+  // library.changed channel and do not evict the protocol hot path.
   sourcePathCache.clearLibrary(parsed.libraryId);
   evictArtifactPathCache(parsed.libraryId);
-  embeddingTestIndex?.catchUp(parsed.libraryId);
-  embeddingHttpIndex?.catchUp(parsed.libraryId);
   pluginActivationCoordinator?.fanOutDomainEvent(createPluginDomainEvent({
     kind: 'asset.changed',
     libraryId: parsed.libraryId,
@@ -2954,22 +1004,12 @@ function publishAssetChange(event: AssetChangeEvent): void {
       ...(parsed.source === undefined ? {} : { source: parsed.source }),
     },
   }));
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(
-    ASSET_CHANGE_CHANNEL,
-    parsed,
-  );
 }
 
 function publishLibraryChanged(event: LibraryChangedEvent): void {
   const parsed = parseLibraryChangedEvent(event);
-  // `library.changed` is also emitted for immutable derived-artifact writes.
-  // Advancing the Main-side path-cache generation here races a thumbnail
-  // response that is already resolving: the path lookup returns a valid new
-  // artifact, but the generation check rejects it as stale. The Renderer then
-  // sees a transient protocol failure and permanently replaces the image with
-  // its broken-file fallback. Asset/source mutations use asset.changed and
-  // explicitly clear this cache; close/reopen paths clear it as well.
+  // HTTP API responses echo the latest change sequence (ADR-0031 §2).
+  libraryChangeSequences.set(parsed.libraryId, parsed.changeSequence);
   pluginActivationCoordinator?.fanOutDomainEvent(createPluginDomainEvent({
     kind: 'library.changed',
     libraryId: parsed.libraryId,
@@ -2977,52 +1017,6 @@ function publishLibraryChanged(event: LibraryChangedEvent): void {
       changeSequence: parsed.changeSequence,
     },
   }));
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(
-    LIBRARY_CHANGED_CHANNEL,
-    parsed,
-  );
-}
-
-function publishExtensionSaveCompleted(
-  windowId: number | null,
-  event: ExtensionSaveCompletedEvent,
-): void {
-  const target =
-    windowId === null
-      ? mainWindow
-      : BrowserWindow.getAllWindows().find((window) => window.id === windowId);
-  if (!target || target.isDestroyed()) return;
-  target.webContents.send(
-    EXTENSION_SAVE_COMPLETED_CHANNEL,
-    parseExtensionSaveCompletedEvent(event),
-  );
-}
-
-function publishProgress(event: ProgressEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(PROGRESS_CHANNEL, event);
-}
-
-function publishAiProgress(event: AiProgressEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(AI_PROGRESS_CHANNEL, parseAiProgressEvent(event));
-}
-
-function publishAiCompleted(event: AiAnalysisCompletedEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(
-    AI_COMPLETED_CHANNEL,
-    parseAiAnalysisCompletedEvent(event),
-  );
-}
-
-function publishAiCleared(event: AiContentClearedEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(
-    AI_CLEARED_CHANNEL,
-    parseAiContentClearedEvent(event),
-  );
 }
 
 async function enqueueAutoAnalyzeAfterImport(
@@ -3065,7 +1059,7 @@ async function processAiQueue(libraryId: string): Promise<void> {
 }
 
 /** Global menu preference: linked-folder assets with a missing source stay listed. */
-let showMissingLinkedFiles = true;
+const showMissingLinkedFiles = true;
 
 /** Shared post-open hook for dialog opens and startup recent-library restore. */
 function pluginThumbnailExtensionsFor(libraryId: string): string[] {
@@ -3114,6 +1108,61 @@ async function notifyLibraryOpenedSideEffects(input: {
   pluginJobScheduler?.tick(input.libraryId);
   await syncPluginThumbnailExtensions();
   workerClient?.publishShowMissingLinkedFiles(showMissingLinkedFiles);
+}
+
+/**
+ * Headless startup restore: reopen the most recent library through the same
+ * worker path the desktop open flow uses, so MCP/extension clients immediately
+ * have an active library. Failures are logged and non-fatal — the backend
+ * keeps running with no library open.
+ */
+async function autoOpenRecentLibrary(): Promise<void> {
+  if (!workerClient) return;
+  if (!recentLibraryAutoOpenEnabled()) return;
+  const activePath = readActiveLibraryPath(recentLibraryPath(), (error) => {
+    logger?.error("recent-library.read", error);
+  });
+  const candidates = activePath
+    ? [activePath, ...readRecentLibrariesForAutoOpen().map((entry) => entry.path)]
+    : readRecentLibrariesForAutoOpen().map((entry) => entry.path);
+  const target = candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0);
+  if (!target) {
+    logger?.info("library.auto-open", "No recent library to reopen.");
+    return;
+  }
+  try {
+    const opened = await workerClient.request({
+      type: "library.open",
+      selectedLibraryPath: target,
+    });
+    if (!opened.ok || opened.type !== "library.opened") {
+      logger?.error("library.auto-open", new Error("Recent library failed to open."));
+      return;
+    }
+    rememberOpenedLibrary(
+      opened.library.libraryPath,
+      opened.library.displayName,
+      opened.library.libraryId,
+    );
+    await notifyLibraryOpenedSideEffects({
+      libraryId: opened.library.libraryId,
+      libraryDirectory: opened.library.libraryPath,
+    });
+    publishLifecycle({
+      type: "library.opened",
+      source: "startup-restore",
+      library: {
+        libraryId: opened.library.libraryId,
+        displayName: opened.library.displayName,
+        displayPath: opened.library.libraryPath,
+      },
+    });
+    logger?.info("library.auto-open", `Reopened library "${opened.library.displayName}".`, {
+      libraryId: opened.library.libraryId,
+    });
+  } catch (error) {
+    logger?.error("library.auto-open", error);
+  }
 }
 
 async function processAiQueueBatch(
@@ -3200,57 +1249,6 @@ async function processAiQueueBatch(
   }
 }
 
-function createNativeDialogHost(): NativeDialogHost {
-  return {
-    getLocale: () => appLocale,
-    getMainWindow: () => mainWindow ?? null,
-    isE2e: () => !app.isPackaged && process.env.SERPENT_E2E === "1",
-  };
-}
-
-async function selectAutomationScriptToOpen(): Promise<string | undefined> {
-  return selectOpenFile(
-    createNativeDialogHost(),
-    'openAutomationScript',
-    process.env.SERPENT_E2E_OPEN_AUTOMATION_SCRIPT,
-    [{ name: 'Serpent scripts', extensions: ['serpent.js', 'serpent.ts'] }],
-  );
-}
-
-async function selectAutomationScriptToSave(): Promise<string | undefined> {
-  return selectSavePath(
-    createNativeDialogHost(),
-    'saveAutomationScript',
-    process.env.SERPENT_E2E_SAVE_AUTOMATION_SCRIPT,
-    {
-      defaultPath: 'Untitled.serpent.ts',
-      filters: [{ name: 'Serpent scripts', extensions: ['serpent.js', 'serpent.ts'] }],
-    },
-  );
-}
-
-async function selectImportSources(
-  sourceKind: "files" | "folder",
-): Promise<string[] | undefined> {
-  return selectImportSourcesDialog(createNativeDialogHost(), sourceKind);
-}
-
-async function selectDirectory(
-  dialogId: "createLibrary" | "openLibrary",
-): Promise<string | undefined> {
-  return selectLibraryDirectory(createNativeDialogHost(), dialogId);
-}
-
-async function selectPluginPackageForInstall(
-  sourceKind: "zip" | "folder",
-): Promise<string | undefined> {
-  return selectPluginPackage(
-    createNativeDialogHost(),
-    sourceKind,
-    process.env.SERPENT_E2E_PLUGIN_PACKAGE,
-  );
-}
-
 let cachedSyncDeviceId: string | undefined;
 
 /** Serpent-xffq：每台设备的稳定同步身份（userData 持久化，非敏感）。 */
@@ -3276,1198 +1274,7 @@ function syncDeviceId(): string {
   return deviceId;
 }
 
-async function commandFor(
-  request: RendererRequest,
-  callbacks?: {
-    onBillfishSourceSelected?: () => void;
-  },
-): Promise<WorkerCommand | undefined> {
-  switch (request.type) {
-    case "library.create.request":
-    case "library.open.request":
-    case "library.recovery-report.request":
-    case "library.inspect-eagle.request":
-    case "library.inspect-billfish.request":
-    case "library.inspect-eagle.cancel.request":
-    case "library.inspect-billfish.cancel.request":
-    case "library.open-eagle.request":
-    case "library.open-billfish.request":
-    case "library.close.request":
-    case "library.rename.request":
-    case "library.delete-from-disk.request":
-    case "library.list.request":
-    case "history.status.request":
-    case "history.undo.request":
-    case "history.redo.request":
-    case "library.list-recent.request":
-    case "library.open-recent.request":
-    case "library.forget-recent.request":
-    case "library.open-cancel.request":
-    case "library.choose-path.request": {
-      return executeLibraryMainCommand(request, {
-        selectDirectory,
-        createNativeDialogHost,
-        cleanupExternalSource,
-        getPendingEagleOpenSourcePath: () => pendingEagleOpenSourcePath,
-        setPendingEagleOpenSourcePath: (value) => { pendingEagleOpenSourcePath = value; },
-        getPendingBillfishOpenSourcePath: () => pendingBillfishOpenSourcePath,
-        setPendingBillfishOpenSourcePath: (value) => { pendingBillfishOpenSourcePath = value; },
-        materializeSelectedExternalLibrary,
-        rememberExternalSource,
-      }, callbacks);
-    }
-    case "folder.create.request":
-    case "folder.rename.request":
-    case "appearance.set.request":
-    case "folder.cover.set.request":
-    case "folder.cover.clear.request":
-    case "folder.cover.set-asset.request":
-    case "folder.list.request":
-    case "folder.browse-entries.request":
-    case "folder.filtered-counts.request":
-    case "folder.entries-request":
-    case "folder.indexed-bytes.request":
-    case "folder.trash.request":
-    case "selection.trash.request":
-    case "folder.delete-from-disk.request":
-    case "linked-folder.remove.request":
-    case "linked-folder.delete-subtree.request":
-    case "linked-folder.create-directory.request":
-    case "linked-folder.rename-directory.request":
-    case "folder.open-in-file-manager.request":
-    case "folder.open-with.request":
-    case "folder.copy-path.request":
-    case "folder.copy.request":
-    case "folder.paste.request":
-    case "folder.clone.request":
-    case "folder.move.request": {
-      return executeFolderMainCommand(request, { createNativeDialogHost });
-    }
-    case "asset.list.request": {
-      return executeAssetQueryMainCommand(request);
-    }
-    case "asset.import-files.request":
-    case "asset.import-folder.request":
-    case "asset.import-eagle.request":
-    case "asset.import-billfish.request":
-    case "asset.import-drop.request":
-    case "asset.resolve-dropped-paths.request":
-    case "asset.import-sequence.confirm":
-    case "asset.import-drop-invalid.report":
-    case "asset.import-web.request":
-    case "asset.import-web-invalid.report":
-    case "asset.import-clipboard.request":
-    case "asset.import.resolve":
-    case "asset.import.skip-source-failure":
-    case "asset.import.abandon":
-    case "asset.refresh.request":
-    case "asset.import-linked.request": {
-      return executeAssetIngestionMainCommand(request, {
-        selectImportSources,
-        createNativeDialogHost,
-        materializeSelectedExternalLibrary,
-        rememberExternalSource,
-        fallbackDirectoryForLibraryId,
-        isUnpackagedE2e: () => !app.isPackaged && process.env.SERPENT_E2E === "1",
-      });
-    }
-    case "linked-folder.list.request":
-    case "linked-folder.relink.request":
-    case "linked-folder.rules.get.request":
-    case "linked-folder.rules.set.request": {
-      return executeLinkedFolderMainCommand(request, {
-        createNativeDialogHost,
-      });
-    }
-    case "ignore.list.request":
-    case "ignore.gitignore.get.request":
-    case "ignore.gitignore.preview.request":
-    case "ignore.gitignore.set.request":
-    case "ignore.set.request": {
-      return executeIgnoreMainCommand(request);
-    }
-    case "linked-folder.assets.copy.request":
-    case "linked-folder.convert.request": {
-      return executeLinkedFolderMainCommand(request, {
-        createNativeDialogHost,
-      });
-    }
-    case "tag.list.request":
-    case "tag.create.request":
-    case "tag.rename.request":
-    case "tag.delete.request":
-    case "tag.delete-many.request":
-    case "tag.merge.request":
-    case "tag.cooccurrence.request":
-    case "tag.assign.request":
-    case "tag.remove.request": {
-      return executeTagMainCommand(request);
-    }
-    case "collection.list.request":
-    case "collection.create.request":
-    case "collection.update.request":
-    case "collection.reorder.request":
-    case "collection.delete.request":
-    case "collection.assets.add.request":
-    case "collection.assets.remove.request":
-    case "collection.assets.reorder.request":
-    case "collection.assets.list.request":
-    case "collection.assets.memberships.request": {
-      return executeCollectionMainCommand(request);
-    }
-    case "asset.metadata.get.request":
-    case "asset.extracted-metadata.get.request":
-    case "asset.color-space.set.request":
-    case "asset.metadata.set.request":
-    case "asset.metadata.backfill.request":
-    case "asset.rating.set.request":
-    case "asset.search.request": {
-      return executeAssetQueryMainCommand(request);
-    }
-    case "browse.session.open.request":
-    case "browse.session.page.request":
-    case "browse.session.ids.request":
-    case "browse.session.close.request":
-    case "library.navigation-summary.request":
-    case "ai.search-plan.request": {
-      return executeBrowseSessionMainCommand(request);
-    }
-    case "smart-collection.list.request":
-    case "smart-collection.create.request":
-    case "smart-collection.update.request":
-    case "smart-collection.delete.request":
-    case "smart-collection.execute.request": {
-      return executeSmartCollectionMainCommand(request);
-    }
-    case "asset.trash.request":
-    case "asset.sequence.create.request":
-    case "asset.sequence.dissolve.request":
-    case "asset.sequence.dissolve-batch.request":
-    case "asset.sequence.set-fps.request":
-    case "asset.restore.request":
-    case "asset.restore-preview.request":
-    case "asset.move.request":
-    case "asset.move-undo.request":
-    case "asset.copy.request":
-    case "asset.copy-undo.request":
-    case "asset.rename-file.request":
-    case "asset.zip.list.request":
-    case "asset.zip.read-entry.request":
-    case "asset.text.read.request":
-    case "asset.text.save.request":
-    case "asset.delete-permanent.request":
-    case "asset.delete-from-disk.request":
-    case "trash.list.request":
-    case "trash.list-folders.request":
-    case "trash.restore-folder.request":
-    case "trash.purge.request":
-    case "asset.delete-linked.request":
-    case "asset.relink.request":
-    case "asset.relink-batch.preview-at-root.request":
-    case "asset.relink-batch.request":
-    case "asset.relink-batch.apply.request":
-    case "asset.relink-batch.cancel.request": {
-      return executeAssetMutationMainCommand(request, {
-        createNativeDialogHost,
-        consumeRelinkPreview: (libraryId, previewId) =>
-          pendingRelinkPreviews.consume(libraryId, previewId),
-      });
-    }
-    case "library.export.request":
-    case "library.export.cancel.request":
-    case "library.import.request":
-    case "library.import-zip.request":
-    case "library.import.cancel.request":
-    case "asset.delete-cancel.request":
-    case "library.import.copy.request":
-    case "library.import.open-in-place.request": {
-      return executeLibraryTransferMainCommand(request, {
-        createNativeDialogHost,
-        downloadsPath: () => app.getPath("downloads"),
-        pendingImportSources,
-      });
-    }
-    case "ai.config.get.request":
-    case "ai.config.set.request":
-    case "ai.profiles.save.request":
-    case "ai.profiles.activate.request":
-    case "ai.profiles.delete.request":
-    case "ai.list-models.request":
-    case "ai.test-connection.request":
-    case "ai.clear-content.request": {
-      return executeAiMainCommand(request, {
-        loadAiConfig,
-        getDecryptedApiKey,
-      });
-    }
-    case "media.job-summary.request":
-    case "media.set-audio-preview-preference.request":
-    case "asset.rotate-image-content.request":
-    case "media.list-jobs.request":
-    case "plugin.list-jobs.request":
-    case "media.pause-jobs.request":
-    case "media.resume-jobs.request":
-    case "media.cancel-jobs.request":
-    case "media.retry-jobs.request": {
-      return executeMediaJobMainCommand(request);
-    }
-    case "ai.pause-jobs.request":
-    case "ai.resume-jobs.request":
-    case "ai.cancel-jobs.request":
-    case "ai.retry-jobs.request":
-    case "ai.status.request":
-    case "ai.pending-assets.request":
-    case "asset.analyze.request":
-    case "assets.analyze.request":
-    case "ai.content.get.request": {
-      return executeAiMainCommand(request, {
-        loadAiConfig,
-        getDecryptedApiKey,
-      });
-    }
-    case "asset.thumbnail.request":
-    case "asset.thumbnail.visible-window.request": {
-      return executeMediaPathMainCommand(request);
-    }
-    case "sync.asset-card-status.request":
-    case "sync.probe.request":
-    case "sync.preview.request":
-    case "sync.run.request":
-    case "sync.list-remote-libraries.request":
-    case "sync.open-remote-library.request": {
-      return executeSyncMainCommand(request, {
-        resolveSyncServerCredentials,
-        syncDeviceId,
-        createNativeDialogHost,
-      });
-    }
-    case "model.resolve-companions.request":
-    case "model.convert-fbx.request":
-    case "asset.preview.request":
-    case "asset.close-preview.request":
-    case "asset.preview-error.report":
-    case "asset.recovery-probe.request":
-    case "asset.open-external.request":
-    case "asset.open-with.request":
-    case "asset.reveal-in-folder.request":
-    case "asset.copy-file-path.request":
-    case "asset.copy-files.request":
-    case "asset.retry-artifact.request": {
-      return executeMediaPathMainCommand(request);
-    }
-    case "sync.servers.list.request":
-    case "sync.servers.upsert.request":
-    case "sync.servers.delete.request":
-    case "sync.library.binding.save.request":
-    case "sync.library.binding.get.request": {
-      return executeSyncMainCommand(request, {
-        resolveSyncServerCredentials,
-        syncDeviceId,
-        createNativeDialogHost,
-      });
-    }
-    case "embedding.models.list.request":
-    case "embedding.models.upsert.request":
-    case "embedding.models.delete.request":
-    case "embedding.models.set-default.request":
-    case "embedding.services.list.request":
-    case "embedding.services.save.request":
-    case "embedding.services.delete.request":
-    case "embedding.services.probe.request":
-    case "embedding.services.grant.request":
-    case "embedding.binding.get.request":
-    case "embedding.binding.save.request":
-    case "embedding.install.status.request":
-    case "embedding.install.start.request":
-    case "embedding.install.delete.request":
-    case "embedding.index.status.request":
-    case "embedding.search.request":
-    case "embedding.similar.request":
-      return undefined;
-    default:
-      return assertNever(request);
-  }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled Renderer request: ${String(value)}`);
-}
-
-/**
- * Per-request Main-side trace for library lifecycle requests.
- *
- * A switch that stops printing Renderer stage markers, never reaches the
- * Worker and logs no error is otherwise unattributable: Main's own dispatch
- * point has to say whether the request was even handled. Opt-in per measurement
- * (SERPENT_E2E_LIBRARY_TRACE=1) so ordinary E2E runs do not gain log volume.
- */
-function libraryRequestTraceEnabled(): boolean {
-  return process.env.SERPENT_E2E === "1"
-    && process.env.SERPENT_E2E_LIBRARY_TRACE === "1";
-}
-
-async function handleLibraryRequest(
-  input: unknown,
-  options: { consumerId: string },
-): Promise<RendererResult> {
-  if (libraryRequestTraceEnabled()) {
-    logger?.info("diag.library-request.enter", "Library request entered Main.", {
-      requestType: (input as { type?: unknown } | null)?.type,
-    });
-  }
-  let operation: "create" | "open" | "import" | "open-eagle" | "open-billfish" | undefined;
-  let lifecyclePublished = false;
-  let clipboardStageDirectory: string | undefined;
-  let command: WorkerCommand | undefined;
-  let retainExternalSource = false;
-  let deleteFromDiskLibraryId: string | undefined;
-  let relinkPreviewContext:
-    | { libraryId: string; previewId: string }
-    | undefined;
-  let previousLibraryPaths: string[] = [];
-  let openCancellation: ActiveLibraryOpenCancellation | undefined;
-  let navigationTrace: {
-    navigationId: string;
-    rendererStartedAtEpochMs?: number;
-    mainEnteredAt: number;
-    workerReturnedAt?: number;
-  } | undefined;
-  const navigationTraceEnabled =
-    process.env.SERPENT_NAVIGATION_TRACE === "1" || libraryRequestTraceEnabled();
-  const logNavigationStage = (
-    stage: string,
-    fields: Record<string, unknown> = {},
-  ): void => {
-    if (!navigationTraceEnabled || !navigationTrace) return;
-    logger?.info("performance.navigation", "Browse navigation performance stage.", {
-      navigationId: navigationTrace.navigationId,
-      stage,
-      ...fields,
-    });
-  };
-  try {
-    const request = parseRendererRequest(input);
-    if (request.type === "browse.session.open.request" && request.navigationId) {
-      navigationTrace = {
-        navigationId: request.navigationId,
-        ...(request.navigationStartedAtEpochMs === undefined
-          ? {}
-          : { rendererStartedAtEpochMs: request.navigationStartedAtEpochMs }),
-        mainEnteredAt: performance.now(),
-      };
-      logNavigationStage("main-enter", {
-        ...(navigationTrace.rendererStartedAtEpochMs === undefined
-          ? {}
-          : { rendererToMainMs: Math.max(0, Date.now() - navigationTrace.rendererStartedAtEpochMs) }),
-      });
-    }
-
-    const libraryOwnedResult = await tryHandleLibraryOwnedRequest(request, {
-      getActiveLibraryOpenCancellation: () => activeLibraryOpenCancellation,
-      logInfo: (scope, message) => {
-        logger?.info(scope, message);
-      },
-      logError: (scope, error) => {
-        logger?.error(scope, error);
-      },
-      selectDirectory,
-      recentLibraryPath,
-      readRecentLibraryEntries,
-      removeRecentLibrary,
-      refreshApplicationMenuRecentLibraries,
-      cleanupExternalSource,
-      getPendingEagleOpenSourcePath: () => pendingEagleOpenSourcePath,
-      setPendingEagleOpenSourcePath: (value) => { pendingEagleOpenSourcePath = value; },
-      getPendingBillfishOpenSourcePath: () => pendingBillfishOpenSourcePath,
-      setPendingBillfishOpenSourcePath: (value) => { pendingBillfishOpenSourcePath = value; },
-    });
-    if (libraryOwnedResult) return libraryOwnedResult;
-    openCancellation = isLibraryOpenRequest(request)
-      ? { cancelled: false }
-      : undefined;
-    if (openCancellation) activeLibraryOpenCancellation = openCancellation;
-
-    if (criticalRendererRequest(request)) {
-      logger?.info(
-        'critical-confirmation.route',
-        'Routing a renderer request through the critical confirmation window.',
-        { requestType: request.type },
-      );
-      if (!(await confirmCriticalRendererRequest(request))) return cancelled();
-    }
-
-    const deleteFromDiskLibraryIdFromRequest = maybeBeginLibraryDeleteFromDisk(request, {
-      beginFence: beginLibraryDeleteMediaFence,
-      clearNativeAssetDragCache,
-    });
-    if (deleteFromDiskLibraryIdFromRequest) {
-      deleteFromDiskLibraryId = deleteFromDiskLibraryIdFromRequest;
-    }
-
-    const ingestionOwnedResult = await tryHandleIngestionOwnedRequest(request, {
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-    });
-    if (ingestionOwnedResult) return ingestionOwnedResult;
-
-    // Serpent-xffq: 同步服务器与库绑定是 Main 本地配置（凭据经 safeStorage）。
-    const syncOwnedResult = await tryHandleSyncOwnedRequest(request, {
-      readSyncServers,
-      writeSyncServers,
-      readSyncBindings,
-      writeSyncBindings,
-      encryptPassword: (password) =>
-        safeStorage.encryptString(password).toString("base64"),
-      syncNow: (libraryId) => {
-        syncAutoScheduler?.syncNow(libraryId);
-      },
-    });
-    if (syncOwnedResult) return syncOwnedResult;
-
-    const embeddingModelResult = await tryHandleEmbeddingModelRequest(request, {
-      readCatalog: readEmbeddingModels,
-      writeCatalog: writeEmbeddingModels,
-      readServices: readEmbeddingServices,
-      writeServices: writeEmbeddingServices,
-      serviceCredentials: {
-        has: (id) => existsSync(embeddingServiceKeyPath(id)),
-        read: readEmbeddingServiceKey,
-        write: writeEmbeddingServiceKey,
-        delete: deleteEmbeddingServiceKey,
-      },
-      userDataPath: () => app.getPath("userData"),
-      homePath: () => app.getPath("home"),
-      readBindings: readEmbeddingBindings,
-      writeBindings: writeEmbeddingBindings,
-      embeddingIndex: embeddingIndex(),
-      embeddingHttpIndex: embeddingHttp(),
-      stopGemmaIndex: () => { void embeddingTestIndex?.close(); },
-      stopHttpIndex: async () => { await embeddingHttpIndex?.close(); },
-      onInstallProgress: (event) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(EMBEDDING_INSTALL_PROGRESS_CHANNEL, event);
-        }
-      },
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-    });
-    if (embeddingModelResult) return embeddingModelResult;
-
-    const aiOwnedResult = await tryHandleAiOwnedRequest(request, {
-      loadAiConfig,
-      getDecryptedApiKey,
-      getDecryptedProfileApiKey,
-      saveAiConfig,
-      saveConnectionProfile: saveAiConnectionProfile,
-      activateConnectionProfile: activateAiConnectionProfile,
-      deleteConnectionProfile: deleteAiConnectionProfile,
-      workerAvailable: () => Boolean(workerClient),
-      requestWorker: (command) => {
-        if (!workerClient) throw new Error("Library Worker is unavailable.");
-        return workerClient.request(command);
-      },
-      processAiQueue,
-      logInfo: (scope, message, context) => {
-        logger?.info(scope, message, context);
-      },
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-    });
-    if (aiOwnedResult) return aiOwnedResult;
-
-    const previewOwnedResult = await tryHandlePreviewOwnedRequest(request, {
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-    });
-    if (previewOwnedResult) return previewOwnedResult;
-
-    const relinkOwnedResult = await tryHandleRelinkOwnedRequest(request, {
-      cancelRelinkPreview: (libraryId, previewId) => {
-        pendingRelinkPreviews.cancel(libraryId, previewId);
-      },
-    });
-    if (relinkOwnedResult) return relinkOwnedResult;
-
-    const openRecent = tryBuildOpenRecentCommand(request, {
-      getActiveLibraryOpenCancellation: () => activeLibraryOpenCancellation,
-      logInfo: (scope, message) => {
-        logger?.info(scope, message);
-      },
-      logError: (scope, error) => {
-        logger?.error(scope, error);
-      },
-      selectDirectory,
-      recentLibraryPath,
-      readRecentLibraryEntries,
-      removeRecentLibrary,
-      refreshApplicationMenuRecentLibraries,
-      cleanupExternalSource,
-      getPendingEagleOpenSourcePath: () => pendingEagleOpenSourcePath,
-      setPendingEagleOpenSourcePath: (value) => { pendingEagleOpenSourcePath = value; },
-      getPendingBillfishOpenSourcePath: () => pendingBillfishOpenSourcePath,
-      setPendingBillfishOpenSourcePath: (value) => { pendingBillfishOpenSourcePath = value; },
-    });
-    if (openRecent?.kind === "result") return openRecent.result;
-    if (openRecent?.kind === "command") {
-      command = openRecent.command;
-    } else {
-      const ingestion = await tryBuildIngestionCommand(request, {
-        isUnpackagedE2e: () => !app.isPackaged && process.env.SERPENT_E2E === "1",
-        e2eEnv: (name) => process.env[name],
-        workerAvailable: () => Boolean(workerClient),
-        requestWorker: (workerCommand) => {
-          if (!workerClient) throw new Error("Library Worker is unavailable.");
-          return workerClient.request(workerCommand);
-        },
-        logInfo: (scope, message, context) => {
-          logger?.info(scope, message, context);
-        },
-        logError: (scope, error, context) => {
-          logger?.error(scope, error, context);
-        },
-        getPendingSequenceOffer: (offerId) => pendingImageSequenceOffers.get(offerId),
-        deletePendingSequenceOffer: (offerId) => {
-          pendingImageSequenceOffers.delete(offerId);
-        },
-        setPendingSequenceNextIndex: (offerId, nextSequenceIndex) => {
-          const pending = pendingImageSequenceOffers.get(offerId);
-          if (pending) pending.nextSequenceIndex = nextSequenceIndex;
-        },
-        tempPath: () => app.getPath("temp"),
-        now: () => new Date(),
-        createImageFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
-        readFileBuffer: (filePath) => readFileSync(filePath),
-        clipboardImageDeps: {
-          readImage: () => clipboard.readImage(),
-          readBuffer: (format) => clipboard.readBuffer(format),
-          readHTML: () => clipboard.readHTML(),
-          createFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
-        },
-        clipboardAvailableFormats: () => clipboard.availableFormats(),
-        readClipboardFilePaths: () => readFilePathsFromClipboard(createFileClipboardDeps()),
-      });
-      if (ingestion?.kind === "result") return ingestion.result;
-      if (ingestion?.kind === "command") {
-        command = ingestion.command;
-        clipboardStageDirectory = ingestion.clipboardStageDirectory;
-      } else {
-        command = await commandFor(
-          request,
-          request.type === "library.inspect-billfish.request"
-            ? {
-                onBillfishSourceSelected: () => {
-                  operation = "open-billfish";
-                  lifecyclePublished = true;
-                  publishLifecycle({
-                    type: "library.opening",
-                    operation: "open-billfish",
-                  });
-                },
-              }
-            : undefined,
-        );
-      }
-    }
-    if (!command || openCancellation?.cancelled) return cancelled();
-    const sequenceProbe = await maybeProbeImportSequences(request, command, {
-      isUnpackagedE2e: () => !app.isPackaged && process.env.SERPENT_E2E === "1",
-      workerAvailable: () => Boolean(workerClient),
-      requestWorker: (workerCommand) => {
-        if (!workerClient) throw new Error("Library Worker is unavailable.");
-        return workerClient.request(workerCommand);
-      },
-      rememberSequenceOffer: rememberImageSequenceOffer,
-    });
-    if (sequenceProbe?.kind === "result") return sequenceProbe.result;
-    if (sequenceProbe?.kind === "command") command = sequenceProbe.command;
-    relinkPreviewContext = maybeRememberRelinkPreview(
-      request,
-      command,
-      (libraryId, newRootPath) => pendingRelinkPreviews.create(libraryId, newRootPath),
-    );
-    if (!workerClient) throw new Error("Library Worker is unavailable.");
-    const lifecycle = await prepareLibraryLifecycle(command, {
-      operation,
-      lifecyclePublished,
-    }, {
-      closeOpenLibrariesBeforeReplacement,
-      publishOpening: (nextOperation) => {
-        publishLifecycle({ type: "library.opening", operation: nextOperation });
-      },
-    });
-    if (lifecycle.kind === "result") return lifecycle.result;
-    command = lifecycle.command;
-    operation = lifecycle.operation;
-    previousLibraryPaths = lifecycle.previousLibraryPaths;
-    if (lifecycle.clearPendingEagle) pendingEagleOpenSourcePath = undefined;
-    if (lifecycle.clearPendingBillfish) pendingBillfishOpenSourcePath = undefined;
-
-    await maybeDelayE2eTrash(command, {
-      isUnpackagedE2e: () => !app.isPackaged && process.env.SERPENT_E2E === "1",
-      env: (name) => process.env[name],
-      delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    });
-
-    // 测试连接（sync.probe）：单次超时后自动重试，最大重试后给出提醒
-    // （用户决定 2026-08-17；传输数据本身无墙钟超时）。
-    const viewerRequest = command.type === "media.get-preview-artifact" ? command : undefined;
-    const viewerWorkerStartedAt = VIEWER_TIMING_LOG && viewerRequest !== undefined
-      ? performance.now()
-      : 0;
-    const navigationWorkerStartedAt = navigationTrace ? performance.now() : 0;
-    const workerResult = command.type === "sync.probe"
-      ? await runSyncProbeWithRetry(command, (probe) => {
-        if (!workerClient) throw new Error("Library Worker is unavailable.");
-        return workerClient.request(probe);
-      })
-      : await (async () => {
-        const traceLibraryRequest = libraryRequestTraceEnabled();
-        if (traceLibraryRequest) {
-          logger?.info(
-            "diag.library-request.dispatch",
-            "Dispatching the library command to the Worker.",
-            { workerCommand: command.type },
-          );
-        }
-        const result = await workerClient.request(command, { consumerId: options.consumerId });
-        if (traceLibraryRequest) {
-          logger?.info(
-            "diag.library-request.dispatched",
-            "The Worker answered the library command.",
-            { workerCommand: command.type, ok: result.ok, resultType: result.ok ? result.type : undefined },
-          );
-        }
-        return result;
-      })();
-    if (navigationTrace) {
-      navigationTrace.workerReturnedAt = performance.now();
-      logNavigationStage("worker-returned", {
-        workerRoundTripMs: Math.max(0, navigationTrace.workerReturnedAt - navigationWorkerStartedAt),
-        mainElapsedMs: Math.max(0, navigationTrace.workerReturnedAt - navigationTrace.mainEnteredAt),
-        ok: workerResult.ok,
-        resultType: workerResult.ok ? workerResult.type : undefined,
-      });
-    }
-    if (viewerWorkerStartedAt > 0) {
-      logger?.info("viewer.preview-worker-timing", "Preview request resolved.", {
-        libraryId: viewerRequest?.libraryId,
-        assetId: viewerRequest?.assetId,
-        workerMs: Math.round(performance.now() - viewerWorkerStartedAt),
-        resultType: workerResult.ok ? workerResult.type : undefined,
-        errorCode: workerResult.ok ? undefined : workerResult.error.code,
-      });
-    }
-    const replacementOutcome = await applyLibraryReplacementAfterWorker(workerResult, {
-      cancelled: Boolean(openCancellation?.cancelled),
-      previousLibraryPaths,
-      operation,
-    }, {
-      closeOpenedLibrary: async (libraryId) => {
-        if (!workerClient) throw new Error("Library Worker is unavailable.");
-        await workerClient.request({
-          type: "library.close",
-          libraryId,
-        }, { consumerId: options.consumerId });
-      },
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-      reopenLibrariesAfterFailedReplacement,
-      publishLifecycle,
-    });
-    if (replacementOutcome) return replacementOutcome;
-
-    const externalSource = await applyExternalLibrarySourceCleanup(command, workerResult, {
-      cleanupExternalSource,
-    });
-    retainExternalSource = externalSource.retainExternalSource;
-
-    maybePrimeNativeDrag(request, workerResult, {
-      pendingImportLibraries,
-      primeImmediately: (libraryId, assetIds, mode) => {
-        void nativeAssetDragPrimer.primeImmediately(libraryId, assetIds, mode);
-      },
-    });
-
-    if (!workerResult.ok && relinkPreviewContext) {
-      pendingRelinkPreviews.cancel(
-        relinkPreviewContext.libraryId,
-        relinkPreviewContext.previewId,
-      );
-    }
-
-    applyLibraryWorkerSideEffects(request, command, workerResult, {
-      rememberOpenedLibrary,
-      removeRecentLibrary,
-      recentLibraryPath,
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-      setPendingEagleOpenSourcePath: (value) => {
-        pendingEagleOpenSourcePath = value;
-      },
-      setPendingBillfishOpenSourcePath: (value) => {
-        pendingBillfishOpenSourcePath = value;
-      },
-      purgePreviewLibrary: (libraryId) => {
-        void previewCache?.purgeLibrary(libraryId);
-      },
-      pendingCleanupPath: pendingLibraryCleanupPath,
-      readPendingCleanupAsidePaths,
-      writePendingCleanupAsidePaths,
-      retryPendingLibraryCleanups: () => {
-        void retryPendingLibraryCleanups();
-      },
-      clearRelinkLibrary: (libraryId) => pendingRelinkPreviews.clearLibrary(libraryId),
-      clearSourcePathLibrary: (libraryId) => sourcePathCache.clearLibrary(libraryId),
-      clearArtifactPathCache,
-      cancelArtifactPathBatches,
-      clearPendingImportsForLibrary: (libraryId) => {
-        for (const [importId, pendingLibraryId] of pendingImportLibraries) {
-          if (pendingLibraryId !== libraryId) continue;
-          pendingImportLibraries.delete(importId);
-          pendingImportCollections.delete(importId);
-        }
-      },
-      processAiQueue: (libraryId) => {
-        void processAiQueue(libraryId);
-      },
-      notifyLibraryOpened: (input) => {
-        notifyLibraryOpenedSideEffects(input).catch((error) => {
-          logger?.error("plugin.activation.library-opened", error, {
-            libraryId: input.libraryId,
-          });
-        });
-      },
-      onLibraryClosed: (libraryId) => {
-        pluginActivationCoordinator?.onLibraryClosed(libraryId);
-        for (const [executionId, context] of pluginAutomationContexts) {
-          if (context.libraryId === libraryId) {
-            pluginAutomationContexts.delete(executionId);
-          }
-        }
-      },
-    });
-
-    applySyncWorkerBindings(request, workerResult, {
-      readSyncBindings,
-      writeSyncBindings,
-      now: () => new Date(),
-    });
-
-    const mediaShellResult = await tryHandleMediaShellWorkerResult(request, workerResult, {
-      logInfo: (scope, message, context) => {
-        logger?.info(scope, message, context);
-      },
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-      openPath: (absolutePath) => shell.openPath(absolutePath),
-      showItemInFolder: (absolutePath) => {
-        shell.showItemInFolder(absolutePath);
-      },
-      writeClipboardText: (text) => {
-        clipboard.writeText(text);
-      },
-      writeClipboardFilePaths: (absolutePaths) =>
-        writeFilePathsToClipboard(absolutePaths, createFileClipboardDeps()),
-      openWith: (absolutePath) =>
-        openPathWithOtherApplication(
-          absolutePath,
-          createOpenWithDeps(appLocale, () => mainWindow ?? null),
-        ),
-    });
-    if (mediaShellResult) return mediaShellResult;
-
-    const importPostProcess = await applyImportWorkerResult(request, workerResult, {
-      pendingImportLibraries,
-      pendingImportCollections,
-      logError: (scope, error, context) => {
-        logger?.error(scope, error, context);
-      },
-      requestWorker: (workerCommand) => {
-        if (!workerClient) throw new Error("Library Worker is unavailable.");
-        return workerClient.request(workerCommand);
-      },
-      enqueueAutoAnalyzeAfterImport: (libraryId, assetIds, importedFolderId) => {
-        void enqueueAutoAnalyzeAfterImport(libraryId, assetIds, importedFolderId);
-      },
-    });
-    if (importPostProcess) return importPostProcess;
-
-    const recoveryReport = tryHandleRecoveryReport(request, workerResult, {
-      showItemInFolder: (absolutePath) => {
-        shell.showItemInFolder(absolutePath);
-      },
-      logError: (scope, error) => {
-        logger?.error(scope, error);
-      },
-    });
-    if (recoveryReport) return recoveryReport;
-
-    const rendererWorkerResult = mapBillfishInspectedDisplayName(command, workerResult);
-    const result = toRendererResult(
-      rendererWorkerResult,
-      relinkPreviewContext?.previewId,
-    );
-    if (navigationTrace) {
-      const responseReadyAt = performance.now();
-      logNavigationStage("main-response-ready", {
-        mainPostProcessMs: navigationTrace.workerReturnedAt === undefined
-          ? 0
-          : Math.max(0, responseReadyAt - navigationTrace.workerReturnedAt),
-        mainTotalMs: Math.max(0, responseReadyAt - navigationTrace.mainEnteredAt),
-        ok: result.ok,
-        resultType: result.ok ? result.type : undefined,
-      });
-    }
-    applyLibraryRendererLifecycle(command, result, workerResult, operation, {
-      removeRecentLibrary,
-      recentLibraryPath,
-      logError: (scope, error) => {
-        logger?.error(scope, error);
-      },
-      unblockLibraryMediaReads,
-      publishLifecycle,
-      clearNativeAssetDragCache,
-      clearActiveRecentLibrary,
-    });
-    if (!result.ok) return result;
-    logNavigationStage("main-return", {
-      mainToIpcReturnMs: navigationTrace?.workerReturnedAt === undefined
-        ? undefined
-        : Math.max(0, performance.now() - navigationTrace.workerReturnedAt),
-    });
-    return result;
-  } catch (error) {
-    if (relinkPreviewContext) {
-      pendingRelinkPreviews.cancel(
-        relinkPreviewContext.libraryId,
-        relinkPreviewContext.previewId,
-      );
-    }
-    logger?.error("main.library-request", error);
-    if (previousLibraryPaths.length > 0) {
-      await reopenLibrariesAfterFailedReplacement(previousLibraryPaths);
-    }
-    const publicError = error instanceof ExternalLibraryArchiveError
-      ? createPublicError(error.publicCode, error.reason)
-        : error instanceof LibraryParentError
-          ? createPublicError(error.code, error.reason)
-        : error instanceof WorkerRequestTimeoutError
-          ? createPublicError("INTERNAL_ERROR")
-          : toPublicError(error);
-    if (operation) {
-      publishLifecycle({
-        type: "library.open-failed",
-        operation,
-        error: publicError,
-      });
-    }
-    return { ok: false, error: publicError };
-  } finally {
-    if (activeLibraryOpenCancellation === openCancellation) {
-      activeLibraryOpenCancellation = undefined;
-    }
-    if (deleteFromDiskLibraryId) {
-      endLibraryDeleteMediaFence(deleteFromDiskLibraryId);
-    }
-    if (!retainExternalSource) {
-      await cleanupExternalSource(externalSourceRootFromCommand(command));
-    }
-    if (clipboardStageDirectory) {
-      try {
-        cleanupClipboardImage(clipboardStageDirectory);
-      } catch (error) {
-        logger?.error("desktop-ingestion.clipboard-cleanup", error);
-      }
-    }
-  }
-}
-
-async function confirmDesktopAutomationWrite(): Promise<boolean> {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  // Native modal dialogs are not controllable through Playwright. Restrict
-  // this deterministic test seam to an unpackaged, isolated E2E process; it
-  // can never be enabled by a shipped build or normal `npm start` session.
-  if (!app.isPackaged
-    && process.env.SERPENT_E2E === '1'
-    && process.env.SERPENT_E2E_AUTOMATION_CONFIRM === '1') {
-    return true;
-  }
-  const response = await dialog.showMessageBox(mainWindow, {
-    type: 'warning',
-    buttons: ['取消', '运行脚本'],
-    defaultId: 1,
-    cancelId: 0,
-    title: '运行自动化脚本',
-    message: '此脚本可以读取资产、标签与合集，修改评分与元数据，创建标签或空文件夹，整理合集，入队 AI 分析，复制文件路径，以及重命名或移入回收站。',
-    detail: '脚本只会获得受限自动化能力；新建资源库和批量导入仍需单独的本机计划确认，不会获得网络下载、磁盘直读、数据库或永久删除权限。每次运行都会记录到应用日志。',
-  });
-  ensureRendererKeyboardFocus(mainWindow, {
-    reattachHwnd: true,
-    reason: "native-dialog.message-box",
-  });
-  return response.response === 1;
-}
-
-let e2eAutomationFilePlanConfirmationCount = 0;
-
-async function confirmDesktopAutomationFilePlan(
-  plan: DesktopAutomationFilePlanSummary,
-  context?: {
-    source: AutomationSource;
-    executionId: string;
-    clientName?: string;
-    libraryDisplayName?: string;
-  },
-): Promise<boolean> {
-  // See confirmDesktopAutomationWrite: this is an isolated, unpackaged E2E
-  // seam only. Production builds always display the fresh plan confirmation.
-  if (!app.isPackaged
-    && process.env.SERPENT_E2E === '1'
-    && process.env.SERPENT_E2E_AUTOMATION_CANCEL_ONCE === '1') {
-    e2eAutomationFilePlanConfirmationCount += 1;
-    if (e2eAutomationFilePlanConfirmationCount === 1) return false;
-  }
-  if (!app.isPackaged
-    && process.env.SERPENT_E2E === '1'
-    && process.env.SERPENT_E2E_AUTOMATION_CONFIRM === '1') {
-    return true;
-  }
-  const action = plan.operation === 'trash'
-    ? '移入回收站'
-    : plan.operation === 'replace-content'
-      ? '原地替换文件内容'
-    : plan.operation === 'move'
-      ? '移动到文件夹'
-      : plan.operation === 'rename-file' || plan.operation === 'rename-files'
-        ? '重命名文件'
-        : plan.operation === 'import'
-          ? '导入文件'
-          : plan.operation === 'create'
-            ? '创建资源库'
-            : '恢复回原始位置';
-  const dialogOptions: MessageBoxOptions = {
-    type: 'warning',
-    buttons: ['取消', `确认${action}`],
-    defaultId: 1,
-    cancelId: 0,
-    title: '确认文件操作',
-    message: context?.source === 'mcp'
-      ? `${context.clientName ?? 'MCP 客户端'} 请求${action} ${plan.executableCount} 项资产${context.libraryDisplayName ? `（资源库“${context.libraryDisplayName}”）` : ''}。`
-      : `准备${action} ${plan.executableCount} 项资产。`,
-    detail: [
-      ...(context?.source === 'mcp'
-        ? ['这是 MCP 客户端发起的文件操作；请确认目标和数量后再执行。']
-        : []),
-      `本次选中 ${plan.targetCount} 项；${plan.blockedCount} 项因当前状态或冲突不会处理。`,
-      ...(plan.conflictCount !== undefined && plan.conflictCount > 0
-        ? [`其中 ${plan.conflictCount} 项检测到目标冲突。`]
-        : []),
-      plan.undoSupported
-        ? '移入回收站后可在回收站中恢复。'
-        : plan.operation === 'replace-content'
-          ? '原文件字节将被覆盖，且无法通过回收站撤销。'
-        : '执行前会再次确认这些资产没有变化。',
-      ...(plan.hookWarnings !== undefined && plan.hookWarnings.length > 0
-        ? [`插件提示：${plan.hookWarnings.join('；')}`]
-        : []),
-    ].join('\n'),
-  };
-  const response = mainWindow && !mainWindow.isDestroyed()
-    ? await dialog.showMessageBox(mainWindow, dialogOptions)
-    : await dialog.showMessageBox(dialogOptions);
-  ensureRendererKeyboardFocus(mainWindow, {
-    reattachHwnd: true,
-    reason: "native-dialog.message-box",
-  });
-  return response.response === 1;
-}
-
-function askCriticalConfirmation(
-  input: Parameters<RendererCriticalConfirmationBroker['request']>[0],
-): Promise<boolean> {
-  const broker = criticalConfirmationBroker;
-  if (broker === undefined) return Promise.resolve(false);
-  return broker.request(input);
-}
-
-async function confirmCriticalLibraryDeletion(libraryId: string): Promise<boolean> {
-  const client = workerClient;
-  if (client === undefined) return false;
-  const listed = await client.request({ type: 'library.list' });
-  if (!listed.ok || listed.type !== 'library.list') return false;
-  const library = listed.libraries.find((candidate) => candidate.libraryId === libraryId);
-  if (library === undefined) return false;
-  const english = appLocale === 'en';
-  return askCriticalConfirmation({
-    title: english ? 'Confirm critical operation' : '确认危险操作',
-    heading: english ? 'Delete this library from disk?' : '从磁盘删除这个资源库？',
-    message: english
-      ? `The library “${library.displayName}” and its Serpent-managed directory will be permanently deleted.`
-      : `资源库“${library.displayName}”及其 Serpent 管理的目录将被永久删除。`,
-    detail: english
-      ? 'This cannot be undone. Linked-folder source directories are not included.'
-      : '此操作无法撤销。关联文件夹的源目录不会被删除。',
-    cancelLabel: english ? 'Cancel' : '取消',
-    confirmLabel: english ? 'Delete from disk' : '从磁盘删除',
-    initialFocus: 'cancel',
-  });
-}
-
-async function confirmEnableAllMcpPermissions(label: string): Promise<boolean> {
-  const copy = mcpFullAccessConfirmationCopy(
-    label,
-    appLocale === 'en' ? 'en' : 'zh-CN',
-  );
-  return askCriticalConfirmation({
-    ...copy,
-    cancelLabel: appLocale === 'en' ? 'Cancel' : '取消',
-    initialFocus: 'cancel',
-  });
-}
-
-function criticalRendererRequest(request: RendererRequest): boolean {
-  return request.type === 'library.delete-from-disk.request'
-    || request.type === 'folder.delete-from-disk.request'
-    || request.type === 'asset.delete-from-disk.request'
-    || request.type === 'asset.delete-permanent.request'
-    || request.type === 'trash.purge.request'
-    || (request.type === 'linked-folder.delete-subtree.request' && request.deleteFromDisk);
-}
-
-type CriticalRendererOperation =
-  | 'folder'
-  | 'linked-folder'
-  | 'linked-asset'
-  | 'asset-permanent'
-  | 'trash-purge'
-  | 'asset';
-
-/**
- * Linked assets are deleted permanently from their source folder (the file never
- * enters the application trash, and the previous implementation's trip through
- * the OS recycle bin is gone), so the confirmation must name that operation
- * instead of the generic "delete these assets" copy.  The renderer supplies
- * `locationKind` as a copy hint only; Main still has no database access.
- */
-function criticalRendererOperation(request: RendererRequest): CriticalRendererOperation {
-  switch (request.type) {
-    case 'folder.delete-from-disk.request':
-      return 'folder';
-    case 'linked-folder.delete-subtree.request':
-      return 'linked-folder';
-    case 'asset.delete-permanent.request':
-      return 'asset-permanent';
-    case 'trash.purge.request':
-      return 'trash-purge';
-    case 'asset.delete-from-disk.request':
-      return request.locationKind === 'linked' ? 'linked-asset' : 'asset';
-    default:
-      return 'asset';
-  }
-}
-
-function criticalRendererCopy(
-  operation: CriticalRendererOperation,
-  count: number,
-  english: boolean,
-): { heading: string; message: string; detail: string } {
-  switch (operation) {
-    case 'folder':
-      return {
-        heading: english ? 'Delete this folder from disk?' : '从磁盘删除这个文件夹？',
-        message: english
-          ? 'The selected folder and its managed assets will be permanently deleted.'
-          : '选定文件夹及其中的托管资产将被永久删除。',
-        detail: english
-          ? 'This cannot be undone and the files will not go to the application trash.'
-          : '此操作无法撤销，文件不会进入应用回收站。',
-      };
-    case 'linked-folder':
-      return {
-        heading: english ? 'Delete linked-folder files from disk?' : '从磁盘删除链接文件夹内容？',
-        message: english
-          ? 'The selected linked-folder source files will be permanently deleted.'
-          : '选定链接文件夹中的源文件将被永久删除。',
-        detail: english
-          ? 'This cannot be undone and the files will not go to the application trash.'
-          : '此操作无法撤销，文件不会进入应用回收站。',
-      };
-    case 'linked-asset':
-      return {
-        heading: english ? 'Delete these linked assets from disk?' : '从磁盘删除这些链接资产的源文件？',
-        message: english
-          ? `The source files of ${count} selected linked asset(s) will be permanently deleted, and their library link records with them.`
-          : `选定 ${count} 个链接资产的源文件将被永久删除，库内的链接记录也会一并移除。`,
-        detail: english
-          ? 'This cannot be undone; the source files are deleted from the linked folder and do not go to the recycle bin.'
-          : '此操作无法撤销：链接文件夹中的源文件会被直接删除，不会进入系统回收站。',
-      };
-    case 'asset-permanent':
-      return {
-        heading: english ? 'Permanently delete these trash assets?' : '永久删除这些回收站资产？',
-        message: english
-          ? `${count} selected trash asset(s) will be permanently deleted.`
-          : `选定的 ${count} 项回收站资产将被永久删除。`,
-        detail: english
-          ? 'This cannot be undone and the files will not go to the application trash.'
-          : '此操作无法撤销，文件不会进入应用回收站。',
-      };
-    case 'trash-purge':
-      return {
-        heading: english ? 'Empty the Serpent trash permanently?' : '永久清空 Serpent 回收站？',
-        message: english
-          ? 'All assets currently in the Serpent trash will be permanently deleted.'
-          : 'Serpent 回收站中的全部资产将被永久删除。',
-        detail: english
-          ? 'This cannot be undone and the files will not go to the application trash.'
-          : '此操作无法撤销，文件不会进入应用回收站。',
-      };
-    case 'asset':
-      return {
-        heading: english ? 'Delete these assets from disk?' : '从磁盘删除这些资产？',
-        message: english
-          ? `${count} selected asset(s) will be permanently deleted.`
-          : `选定的 ${count} 项资产将被永久删除。`,
-        detail: english
-          ? 'This cannot be undone and the files will not go to the application trash.'
-          : '此操作无法撤销，文件不会进入应用回收站。',
-      };
-  }
-}
-
-async function confirmCriticalRendererRequest(request: RendererRequest): Promise<boolean> {
-  if (request.type === 'library.delete-from-disk.request') {
-    return confirmCriticalLibraryDeletion(request.libraryId);
-  }
-  const english = appLocale === 'en';
-  const count = request.type === 'asset.delete-from-disk.request'
-    || request.type === 'asset.delete-permanent.request'
-    ? request.assetIds.length
-    : 0;
-  const operation = criticalRendererOperation(request);
-  const { heading, message, detail } = criticalRendererCopy(operation, count, english);
-  const forceDelete = criticalConfirmationInitialFocusForOperation(operation) === 'confirm';
-  return askCriticalConfirmation({
-    title: english ? 'Confirm critical operation' : '确认危险操作',
-    heading,
-    message,
-    detail,
-    cancelLabel: english ? 'Cancel' : '取消',
-    confirmLabel: forceDelete
-      ? criticalDiskDeleteConfirmLabel(english)
-      : (english ? 'Delete permanently' : '永久删除'),
-    initialFocus: criticalConfirmationInitialFocusForOperation(operation),
-  });
-}
-
-async function executeMcpLibraryContextCommand(input: {
+async function executeApiLibraryContextCommand(input: {
   commandId: 'library.list-open' | 'library.list-recent' | 'library.open' | 'library.show-in-desktop';
   executionId: string;
   context: AutomationExecutionContext;
@@ -4530,7 +1337,7 @@ async function executeMcpLibraryContextCommand(input: {
   }
   if (input.commandId === 'library.open') {
     if (selected.libraryId === '' || needsOpen) {
-      publishLifecycle({ type: 'library.opening', operation: 'open', source: 'mcp' });
+      publishLifecycle({ type: 'library.opening', operation: 'open', source: 'http' });
       const opened = await client.request({
         type: 'library.open',
         selectedLibraryPath: selected.libraryPath,
@@ -4581,7 +1388,7 @@ async function executeMcpLibraryContextCommand(input: {
   };
 }
 
-async function normalizeMcpCommandInput(input: {
+async function normalizeApiCommandInput(input: {
   commandId: AutomationCommandId;
   executionId: string;
   context: AutomationExecutionContext;
@@ -4597,129 +1404,9 @@ async function normalizeMcpCommandInput(input: {
   return input.commandInput;
 }
 
-/**
- * A Windows installer keeps its executable locked while it is running, and
- * the main process exits immediately after handing it off. A detached hidden
- * PowerShell worker removes the installer directory after setup releases it.
- * The path is generated by the update service under the OS temp directory.
- */
-async function scheduleWindowsInstallerCleanup(
-  installerPath: string,
-  installerPid: number,
-): Promise<void> {
-  if (process.platform !== "win32") return;
-  const cleanup = createWindowsInstallerCleanupInvocation({
-    installerPath,
-    installerPid,
-    logPath: appLogPath,
-  });
-  const spawnOptions = {
-    detached: true,
-    stdio: "ignore" as const,
-    windowsHide: true,
-    env: cleanup.env,
-  };
-  try {
-    const cleanupProcess = spawn(
-      cleanup.executable,
-      cleanup.args,
-      spawnOptions,
-    );
-    await new Promise<void>((resolve, reject) => {
-      const handleSpawnError = (error: Error) => {
-        cleanupProcess.off("spawn", handleSpawn);
-        reject(error);
-      };
-      const handleSpawn = () => {
-        cleanupProcess.off("error", handleSpawnError);
-        resolve();
-      };
-      cleanupProcess.once("error", handleSpawnError);
-      cleanupProcess.once("spawn", handleSpawn);
-    });
-    cleanupProcess.once("error", (error) => {
-      logger?.error("app-update.cleanup", error, {
-        artifactKind: "windows-installer-cleanup",
-      });
-    });
-    cleanupProcess.unref();
-
-    if (
-      process.env.SERPENT_E2E === "1"
-      && process.env.SERPENT_E2E_APP_UPDATE_FIXTURE === "1"
-      && process.env.SERPENT_E2E_APP_UPDATE_SPAWN_LOG
-    ) {
-      try {
-        appendFileSync(
-          process.env.SERPENT_E2E_APP_UPDATE_SPAWN_LOG,
-          `${JSON.stringify({
-            executable: cleanup.executable,
-            args: cleanup.args,
-            installerPath: cleanup.env.SERPENT_UPDATE_CLEANUP_INSTALLER,
-            ...spawnOptions,
-            env: undefined,
-            spawned: true,
-            pid: cleanupProcess.pid,
-          })}\n`,
-          "utf8",
-        );
-      } catch {
-        // Test instrumentation must not interfere with handing off an installer.
-      }
-    }
-  } catch (error) {
-    logger?.error("app-update.cleanup", error, {
-      artifactKind: "windows-installer-cleanup",
-    });
-    throw error;
-  }
-}
-
-function createAppUpdateE2eFetch(): AppUpdateFetch | undefined {
-  if (
-    process.env.SERPENT_E2E !== "1"
-    || process.env.SERPENT_E2E_APP_UPDATE_FIXTURE !== "1"
-  ) return undefined;
-  const releasePath = process.env.SERPENT_E2E_UPDATE_RELEASE;
-  const archivePath = process.env.SERPENT_E2E_UPDATE_ARCHIVE;
-  const assetUrl = process.env.SERPENT_E2E_UPDATE_ASSET_URL;
-  if (
-    !releasePath || !path.isAbsolute(releasePath)
-    || !archivePath || !path.isAbsolute(archivePath)
-    || !assetUrl
-  ) return undefined;
-
-  const releaseApiUrl = "https://api.github.com/repos/dolag233/Serpent/releases/latest";
-  return async (input) => {
-    if (input === releaseApiUrl) {
-      return new Response(await readFile(releasePath), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    if (input === assetUrl) {
-      return new Response(await readFile(archivePath), {
-        status: 200,
-        headers: { "content-type": "application/octet-stream" },
-      });
-    }
-    return new Response(null, { status: 404 });
-  };
-}
-
 async function startApplication(): Promise<void> {
-  // Serpent-tluf: the macOS About panel is customized here (ready-late is
-  // fine for it); app.setName lives at module top level so the application
-  // menu's first item shows "Serpent" from the very first frame.
-  if (process.platform === "darwin") {
-    app.setAboutPanelOptions({
-      applicationName: "Serpent",
-      applicationVersion: app.getVersion(),
-    });
-  }
-  // Windows: taskbar/start-pin grouping requires the AppUserModelID to match
-  // the shortcuts created by the installer (WiX/Squirrel both set one). Without
-  // this, the taskbar shows the default Electron icon and pinning breaks.
+  // Windows: keep the AppUserModelID so any OS-level integration (jump lists,
+  // notifications from media jobs) groups under the Serpent identity.
   if (process.platform === "win32") {
     app.setAppUserModelId("com.serpent.app");
   }
@@ -4732,113 +1419,13 @@ async function startApplication(): Promise<void> {
   }
   appLogPath = chooseUniqueSessionLogPath(app.getPath("logs"), new Date());
   logger = new AppLogger(appLogPath);
-  bindRendererKeyboardFocusLogger(logger);
   void sweepOrphanExternalLibraryStagingOnStartup();
-  appUpdateService = createAppUpdateService({
-    currentVersion: app.getVersion(),
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    arch: process.arch,
-    executablePath: app.getPath('exe'),
-    tempDirectory: app.getPath('temp'),
-    downloadsDirectory: app.getPath('downloads'),
-    environment: process.env,
-    fetchImpl: createAppUpdateE2eFetch(),
-    openPath: (filePath) => shell.openPath(filePath),
-    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
-    launchInstaller: async (installerPath) => {
-      if (process.platform === 'win32') {
-        if (
-          process.env.SERPENT_E2E === "1"
-          && process.env.SERPENT_E2E_APP_UPDATE_FIXTURE === "1"
-        ) {
-          // Keep the real updater download, extraction, cleanup worker and app
-          // quit path; only the inert fixture installer process is simulated.
-          await scheduleWindowsInstallerCleanup(installerPath, 730241);
-        } else {
-          const installer = spawn(installerPath, [], {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true,
-          });
-          await new Promise<void>((resolve, reject) => {
-            const handleSpawnError = (error: Error) => reject(error);
-            installer.once('error', handleSpawnError);
-            installer.once('spawn', async () => {
-              installer.off('error', handleSpawnError);
-              if (installer.pid === undefined) {
-                reject(new Error('The Windows installer process has no process ID.'));
-                return;
-              }
-              installer.unref();
-              try {
-                await scheduleWindowsInstallerCleanup(installerPath, installer.pid);
-                resolve();
-              } catch (error) {
-                reject(error);
-              }
-            });
-          });
-        }
-      } else {
-        const openError = await shell.openPath(installerPath);
-        if (openError !== '') throw new Error(openError);
-      }
-      beginUpdateHandoff();
-    },
-    onDownloadProgress: (progress) => {
-      mainWindow?.webContents.send(APP_UPDATE_PROGRESS_CHANNEL, progress);
-    },
-    logger,
-  });
   // Serpent-wgmy: 会话日志最多保留最近 100 份，启动时清理最旧；
   // 清理失败不得阻断启动。
   try {
     pruneSessionLogs(app.getPath("logs"));
   } catch (error) {
     logger?.error("session-log.prune", error);
-  }
-  criticalConfirmationWindowManager = new CriticalConfirmationWindowManager({
-    getParentWindow: () => mainWindow ?? null,
-    createWindow: (options) => new BrowserWindow(options),
-    ipcMain,
-    preloadPath: path.join(__dirname, 'critical-confirmation.js'),
-    logger,
-  });
-  criticalConfirmationBroker = new RendererCriticalConfirmationBroker({
-    getTarget: () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return null;
-      const contents = mainWindow.webContents;
-      return {
-        id: contents.id,
-        isDestroyed: () => contents.isDestroyed(),
-        send: (channel, payload) => {
-          contents.send(channel, payload);
-        },
-        once: (event, listener) => {
-          contents.once(event, listener);
-        },
-        removeListener: (event, listener) => {
-          contents.removeListener(event, listener);
-        },
-      };
-    },
-    ipcMain,
-    logger,
-  });
-  app.on("child-process-gone", (_event, details) => {
-    logRendererChildProcessGone(logger, undefined, details);
-  });
-  applyDevAppIcon();
-  const staleClipboardCount = cleanupStaleClipboardImages(app.getPath("temp"));
-  if (staleClipboardCount > 0) {
-    logger.info(
-      "desktop-ingestion.clipboard-cleanup",
-      "Removed stale clipboard staging directories.",
-      {
-        removedCount: staleClipboardCount,
-      },
-    );
   }
   workerClient = new LibraryWorkerClient(
     path.join(__dirname, "library_worker.js"),
@@ -4865,16 +1452,17 @@ async function startApplication(): Promise<void> {
   // as the standard `thumbnail` artifact.
   offscreenThumbnailRenderer = createOffscreenThumbnailRenderer({
     createWindow: (options) => {
+      // The hidden offscreen window is media pipeline infrastructure, not UI.
       const offscreenWindow = new BrowserWindow(options);
       offscreenWindow.webContents.on(
         "console-message",
-        (_event, level, message, line, sourceId) => {
-          logRendererConsoleMessage(logger, level, message, line, sourceId);
+        (_event: unknown, level: number, message: string, line: number, sourceId: string) => {
+          logger?.info("offscreen-thumbnail.console", message, { level, line, sourceId });
         },
       );
       offscreenWindow.webContents.on(
         "did-fail-load",
-        (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
           logger?.error(
             "offscreen-thumbnail.page-load-failed",
             new Error(`${errorCode}: ${errorDescription}`),
@@ -4953,67 +1541,11 @@ async function startApplication(): Promise<void> {
   const automationIdempotencyStore = createJsonFileAutomationIdempotencyStore(
     path.join(app.getPath('userData'), 'automation-idempotency.json'),
   );
-  mcpPermissionPolicyStore = new McpPermissionPolicyStore(app.getPath('userData'));
-  mcpOperationChallengeStore = new McpOperationChallengeStore();
-  mcpPermissionBroker = new McpPermissionBroker({
-    policyStore: mcpPermissionPolicyStore,
-    challengeStore: mcpOperationChallengeStore,
-    audit: logger,
-  });
-  automationRecentScripts = createJsonFileAutomationRecentScriptsStore(
-    path.join(app.getPath('userData'), 'automation-recent-scripts.json'),
-  );
   const automationWorkerAdapter = new AutomationLibraryWorkerAdapter(workerClient, {
     onAiEnqueued: (libraryId) => processAiQueue(libraryId),
     onAiEnqueueError: (error, libraryId) => {
       logger?.error('automation.ai-queue.trigger-failed', error, { libraryId });
     },
-  });
-  automationScriptFiles = new AutomationScriptFileService({
-    selectOpenScript: selectAutomationScriptToOpen,
-    selectSaveScript: selectAutomationScriptToSave,
-    recentScripts: automationRecentScripts,
-  });
-  const pendingPluginUiDialogs = new Map<string, {
-    resolve: (result: unknown | null) => void;
-    reject: (error: Error) => void;
-    cleanup: () => void;
-    pluginInstanceId: string;
-    sessionId?: string;
-  }>();
-  const pendingPluginUiDialogsBySession = new Map<string, string>();
-  let pluginUiDialogRequestSeq = 0;
-  // Preload uses ipcRenderer.send (same as widget events). handle() only
-  // receives invoke(), so submit/cancel never resolved the plugin command.
-  ipcMain.on(PLUGIN_UI_DIALOG_RESULT_CHANNEL, (_event, input: unknown) => {
-    const parsed = pluginUiDialogResultPayloadSchema.safeParse(input);
-    if (!parsed.success) return;
-    const pending = pendingPluginUiDialogs.get(parsed.data.requestId);
-    if (pending === undefined) return;
-    pending.resolve(parsed.data.result);
-  });
-  ipcMain.on(PLUGIN_UI_WIDGET_EVENT_CHANNEL, (_event, input: unknown) => {
-    const parsed = pluginUiWidgetEventPayloadSchema.safeParse(input);
-    if (!parsed.success) return;
-    const requestId = pendingPluginUiDialogsBySession.get(parsed.data.sessionId);
-    if (requestId === undefined) return;
-    const pending = pendingPluginUiDialogs.get(requestId);
-    if (pending === undefined) return;
-    const event = {
-      type: parsed.data.type,
-      nodeId: parsed.data.nodeId,
-      value: parsed.data.value,
-    };
-    pluginRuntimeSupervisor?.deliverWidgetEvent(
-      pending.pluginInstanceId,
-      parsed.data.sessionId,
-      event,
-    );
-    pluginTrustedRuntimeSupervisor?.deliverWidgetEvent(
-      pending.pluginInstanceId,
-      parsed.data.sessionId,
-      event,
-    );
   });
   automationCommandGateway = createAutomationCommandGateway(
     automationWorkerAdapter,
@@ -5050,112 +1582,27 @@ async function startApplication(): Promise<void> {
           return binaries;
         },
       },
+      // Headless: plugin UI dialogs and toasts have no surface; plugin
+      // backend contributions (jobs, hooks, providers, MCP tools) keep working.
       uiDialogHandler: {
-        open: (input, context) => new Promise((resolve, reject) => {
-          const window = mainWindow;
-          if (!window || window.isDestroyed()) {
-            reject(new Error('DIALOG_WINDOW_UNAVAILABLE'));
-            return;
-          }
-          pluginUiDialogRequestSeq += 1;
-          const requestId = `plugin-ui-dialog-${pluginUiDialogRequestSeq}`;
-          const pluginInstanceId = context.pluginInstanceId ?? '';
-          const sessionId = 'sessionId' in input ? input.sessionId : undefined;
-          const onWindowClosed = () => {
-            const pending = pendingPluginUiDialogs.get(requestId);
-            if (pending !== undefined) {
-              pendingPluginUiDialogs.delete(requestId);
-              if (pending.sessionId !== undefined) {
-                pendingPluginUiDialogsBySession.delete(pending.sessionId);
-              }
-              pending.reject(new Error('DIALOG_WINDOW_UNAVAILABLE'));
-            }
-          };
-          pendingPluginUiDialogs.set(requestId, {
-            resolve: (result) => {
-              pendingPluginUiDialogs.delete(requestId);
-              if (sessionId !== undefined) pendingPluginUiDialogsBySession.delete(sessionId);
-              window.removeListener('closed', onWindowClosed);
-              resolve(result);
-            },
-            reject: (error) => {
-              pendingPluginUiDialogs.delete(requestId);
-              if (sessionId !== undefined) pendingPluginUiDialogsBySession.delete(sessionId);
-              window.removeListener('closed', onWindowClosed);
-              reject(error);
-            },
-            cleanup: () => window.removeListener('closed', onWindowClosed),
-            pluginInstanceId,
-            ...(sessionId === undefined ? {} : { sessionId }),
-          });
-          if (sessionId !== undefined) pendingPluginUiDialogsBySession.set(sessionId, requestId);
-          window.once('closed', onWindowClosed);
-          if ('tree' in input) {
-            window.webContents.send(PLUGIN_UI_DIALOG_REQUEST_CHANNEL, {
-              requestId,
-              pluginId: context.pluginId ?? '',
-              pluginInstanceId,
-              libraryId: context.libraryId ?? PLUGIN_GLOBAL_RUNTIME_LIBRARY_ID,
-              sessionId: input.sessionId,
-              title: input.title,
-              ...(input.submitLabel === undefined ? {} : { submitLabel: input.submitLabel }),
-              tree: input.tree,
-            });
-            ensureRendererKeyboardFocus(window, {
-              reattachHwnd: true,
-              reason: "plugin-ui-dialog.widget",
-            });
-            return;
-          }
-          window.webContents.send(PLUGIN_UI_DIALOG_REQUEST_CHANNEL, {
-            requestId,
-            pluginId: context.pluginId ?? '',
-            pluginInstanceId,
-            dialogId: input.dialogId,
-            libraryId: context.libraryId ?? PLUGIN_GLOBAL_RUNTIME_LIBRARY_ID,
-            payload: input.payload ?? null,
-          });
-          ensureRendererKeyboardFocus(window, {
-            reattachHwnd: true,
-            reason: "plugin-ui-dialog.iframe",
-          });
-        }),
-        patch: (input) => {
-          const requestId = pendingPluginUiDialogsBySession.get(input.sessionId);
-          if (requestId === undefined) {
-            throw new Error('DIALOG_SESSION_NOT_FOUND');
-          }
-          const window = mainWindow;
-          if (!window || window.isDestroyed()) {
-            throw new Error('DIALOG_WINDOW_UNAVAILABLE');
-          }
-          window.webContents.send(PLUGIN_UI_DIALOG_PATCH_CHANNEL, {
-            requestId,
-            tree: input.tree,
-          });
+        open: () => Promise.reject(new Error('DIALOG_WINDOW_UNAVAILABLE')),
+        patch: () => {
+          throw new Error('DIALOG_SESSION_NOT_FOUND');
         },
       },
       uiNotifyHandler: {
         notify: (input) => {
-          if (!mainWindow || mainWindow.isDestroyed()) {
-            throw new Error('The Serpent window is not available to show a notification.');
-          }
-          // Serpent review: ui.notify is strictly non-blocking (toast only);
-          // the dialog mode was removed from the registry input schema.
-          mainWindow.webContents.send(SHELL_NOTIFY_CHANNEL, {
+          logger?.info('plugin.ui-notify', input.message.trim().slice(0, 500), {
             severity: input.severity,
-            mode: 'toast',
-            message: input.message.trim().slice(0, 500),
-            ...(typeof input.title === 'string' && input.title.trim().length > 0
-              ? { title: input.title.trim().slice(0, 120) }
-              : {}),
           });
         },
       },
       filePlanApprovalHandler: createDesktopAutomationFilePlanApprovalHandler({
         workerClient: automationWorkerAdapter,
         audit: { info: (scope, message, context) => logger?.info(scope, message, context) },
-        confirm: confirmDesktopAutomationFilePlan,
+        // Headless approval policy: fail closed. Dangerous file plans are
+        // rejected and logged; no human confirmation surface exists.
+        confirm: async () => false,
         runWillHooks: async ({ commandId, libraryId, commandInput, planSummary }) => {
           if (commandId !== 'asset.trash' || pluginActivationCoordinator === undefined) {
             return { warnings: [] };
@@ -5175,7 +1622,6 @@ async function startApplication(): Promise<void> {
           return { warnings: result.warnings };
         },
       }),
-      permissionBroker: mcpPermissionBroker,
       // Plugin executions are library-scoped Host calls, not Automation
       // Executions owned by the journal. They still use the Gateway for
       // domain access, but must not enter the journal's active-context CAS;
@@ -5190,20 +1636,16 @@ async function startApplication(): Promise<void> {
         },
       },
       libraryContextHandler: {
-        execute: executeMcpLibraryContextCommand,
+        execute: executeApiLibraryContextCommand,
       },
       // Serpent-ihpx: automation imports (MCP/scripts) are no different from
       // human imports — the same automatic AI analysis side effect fires here,
       // converging on the exact function the desktop import IPC uses.
       onImportCompleted: ({ libraryId, importedAssetIds }) => {
         if (importedAssetIds.length === 0) return;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(SHELL_NOTIFY_CHANNEL, {
-            severity: 'info',
-            mode: 'toast',
-            message: `已导入 ${importedAssetIds.length} 项资源`,
-          });
-        }
+        logger?.info('automation.import-completed', `Imported ${importedAssetIds.length} asset(s).`, {
+          libraryId,
+        });
         void enqueueAutoAnalyzeAfterImport(libraryId, importedAssetIds);
       },
       historyEntryHandler: {
@@ -5215,7 +1657,7 @@ async function startApplication(): Promise<void> {
           automationExecutionJournal?.appendHistoryEntry(executionId, historyEntryId);
         },
       },
-      mcpInputNormalizer: normalizeMcpCommandInput,
+      apiInputNormalizer: normalizeApiCommandInput,
       libraryBindingHandler: {
         onLibraryCreated: async ({ source, library }) => {
           rememberOpenedLibrary(library.libraryPath, library.displayName, library.libraryId);
@@ -5225,7 +1667,7 @@ async function startApplication(): Promise<void> {
           });
           publishLifecycle({
             type: 'library.opened',
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
             library: {
               libraryId: library.libraryId,
               displayName: library.displayName,
@@ -5244,14 +1686,14 @@ async function startApplication(): Promise<void> {
           publishLifecycle({
             type: 'library.closed',
             libraryId,
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
           });
         },
         onLibraryRenamed: async ({ source, library }) => {
           rememberOpenedLibrary(library.libraryPath, library.displayName, library.libraryId);
           publishLifecycle({
             type: 'library.opened',
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
             library: {
               libraryId: library.libraryId,
               displayName: library.displayName,
@@ -5267,19 +1709,14 @@ async function startApplication(): Promise<void> {
           removeRecentLibrary(recentLibraryPath(), libraryPath, (error) => {
             logger?.error('recent-library.remove', error);
           });
-          refreshApplicationMenuRecentLibraries();
           publishLifecycle({
             type: 'library.closed',
             libraryId,
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
           });
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(SHELL_NOTIFY_CHANNEL, {
-              severity: 'info',
-              mode: 'toast',
-              message: `已删除资源库“${displayName}”`,
-            });
-          }
+          logger?.info('automation.library-deleted', `Deleted library "${displayName}".`, {
+            libraryId,
+          });
         },
         onLibraryImported: async ({ source, libraryId, displayName, libraryPath }) => {
           rememberOpenedLibrary(libraryPath, displayName, libraryId);
@@ -5289,20 +1726,16 @@ async function startApplication(): Promise<void> {
           });
           publishLifecycle({
             type: 'library.opened',
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
             library: {
               libraryId,
               displayName,
               displayPath: libraryPath,
             },
           });
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(SHELL_NOTIFY_CHANNEL, {
-              severity: 'info',
-              mode: 'toast',
-              message: `资源库“${displayName}”已导入`,
-            });
-          }
+          logger?.info('automation.library-imported', `Imported library "${displayName}".`, {
+            libraryId,
+          });
         },
         transitionLibraryContext: async ({ executionId, source, libraryId, displayName, expectedRevision, authorizationSource }) => {
           const libraries = await activeWorkerClient.request({ type: 'library.list' });
@@ -5334,7 +1767,7 @@ async function startApplication(): Promise<void> {
           });
           publishLifecycle({
             type: 'library.opened',
-            ...(source === 'mcp' ? { source } : {}),
+            ...(source === 'http' ? { source } : {}),
             library: {
               libraryId: boundLibrary.libraryId,
               displayName: boundLibrary.displayName,
@@ -5382,14 +1815,6 @@ async function startApplication(): Promise<void> {
       },
     },
   );
-  scriptRuntimeSupervisor = new ScriptRuntimeSupervisor({
-    modulePath: path.join(__dirname, 'script_runtime_utility.js'),
-    fork: (modulePath) => utilityProcess.fork(modulePath, [], {
-      serviceName: 'Serpent Script Runtime',
-      stdio: 'pipe',
-    }),
-    logger,
-  });
   const executePluginHostCommand: PluginRuntimeHostCommandHandler = async (commandId, input, context) => {
     const gateway = automationCommandGateway;
     if (gateway === undefined) throw new Error('Automation Gateway is unavailable.');
@@ -5473,7 +1898,6 @@ async function startApplication(): Promise<void> {
     packageHash: string;
     failureCode: string;
   }): void => {
-    pluginInputCaptureBroker?.releaseForInstance(crash.instanceId, 'plugin-crashed');
     void pluginPackageManager?.recordRuntimeCrash({
       libraryId: crash.libraryId,
       libraryDirectory: crash.libraryDirectory,
@@ -5485,9 +1909,8 @@ async function startApplication(): Promise<void> {
     });
   };
   const pluginStorageStore = new PluginStorageStore(app.getPath('userData'));
-  const pluginSettingsStore = new PluginSettingsStore(app.getPath('userData'));
-  const pluginMcpExposureStore = new PluginMcpExposureStore(app.getPath('userData'));
-  await pluginMcpExposureStore.load();
+  // Note: plugin settings were a renderer-managed store; headless plugins use
+  // defaults. The store module stays for a future settings API.
   const executePluginStorage: PluginRuntimeStorageHandler = async (input) => {
     try {
       return await pluginStorageStore.execute({
@@ -5692,35 +2115,12 @@ async function startApplication(): Promise<void> {
   const onPluginInstanceActivated = (input: { libraryId: string }): void => {
     pluginJobScheduler?.tick(input.libraryId);
   };
-  const handlePluginInputCaptureStart: PluginRuntimeInputCaptureStartHandler = (input) => {
-    if (pluginInputCaptureBroker === undefined) {
-      return {
-        ok: false,
-        code: 'CAPTURE_UNAVAILABLE',
-        message: 'Input capture is unavailable in this session.',
-      };
-    }
-    return pluginInputCaptureBroker.start({
-      ...input.options,
-      instanceId: input.instanceId,
-      pluginId: input.pluginId,
-      libraryId: input.libraryId,
-      permissions: input.permissions,
-    });
-  };
-  pluginInputCaptureBroker = new PluginInputCaptureBroker({
-    onStart: () => {
-      publishPluginInputCaptureSessionsToRenderer();
-    },
-    onEvent: (session, event) => {
-      pluginRuntimeSupervisor?.deliverInputCaptureEvent(session.instanceId, session.sessionId, event);
-      pluginTrustedRuntimeSupervisor?.deliverInputCaptureEvent(session.instanceId, session.sessionId, event);
-    },
-    onEnd: (session, reason) => {
-      pluginRuntimeSupervisor?.endInputCapture(session.instanceId, session.sessionId, reason);
-      pluginTrustedRuntimeSupervisor?.endInputCapture(session.instanceId, session.sessionId, reason);
-      publishPluginInputCaptureSessionsToRenderer();
-    },
+  // Headless: OS-level keyboard/pointer capture is a GUI plugin capability
+  // and is always rejected; every other plugin capability keeps working.
+  const handlePluginInputCaptureStart: PluginRuntimeInputCaptureStartHandler = () => ({
+    ok: false,
+    code: 'CAPTURE_UNAVAILABLE',
+    message: 'Input capture is unavailable in headless Serpent.',
   });
   pluginRuntimeSupervisor = new PluginRuntimeSupervisor({
     modulePath: path.join(__dirname, 'plugin_standard_host.js'),
@@ -5734,12 +2134,8 @@ async function startApplication(): Promise<void> {
     handleJobProgress: handlePluginJobProgress,
     handleJobControl: handlePluginJobControl,
     handleInputCaptureStart: handlePluginInputCaptureStart,
-    handleInputCaptureRelease: (instanceId, sessionId) => {
-      pluginInputCaptureBroker?.release(sessionId);
-    },
-    onInstanceDeactivated: (instanceId) => {
-      pluginInputCaptureBroker?.releaseForInstance(instanceId, 'plugin-deactivated');
-    },
+    handleInputCaptureRelease: () => undefined,
+    onInstanceDeactivated: () => undefined,
     onInstanceCrashed: ({ instanceId, failureCode }) => {
       pluginActivationCoordinator?.onInstanceCrashed({ instanceId, failureCode });
     },
@@ -5759,12 +2155,8 @@ async function startApplication(): Promise<void> {
     handleJobProgress: handlePluginJobProgress,
     handleJobControl: handlePluginJobControl,
     handleInputCaptureStart: handlePluginInputCaptureStart,
-    handleInputCaptureRelease: (instanceId, sessionId) => {
-      pluginInputCaptureBroker?.release(sessionId);
-    },
-    onInstanceDeactivated: (instanceId) => {
-      pluginInputCaptureBroker?.releaseForInstance(instanceId, 'plugin-deactivated');
-    },
+    handleInputCaptureRelease: () => undefined,
+    onInstanceDeactivated: () => undefined,
     onInstanceCrashed: ({ instanceId, failureCode }) => {
       pluginActivationCoordinator?.onInstanceCrashed({ instanceId, failureCode });
     },
@@ -5790,7 +2182,7 @@ async function startApplication(): Promise<void> {
       nodeAbi,
       logger,
       onDeviceStateRecovered: () => {
-        pendingPluginDeviceStateRecoveryNotice = true;
+        logger?.info('plugin.device-state-recovered', 'Plugin trust state was recovered; settings re-authorization may be required.');
       },
     });
     pluginActivationCoordinator = new PluginActivationCoordinator({
@@ -5830,7 +2222,6 @@ async function startApplication(): Promise<void> {
         void pluginProviderScheduler?.materializeLibrary(libraryId).catch((error) => {
           logger?.error('plugin.providers.materialize', error, { libraryId });
         });
-        embeddedMcpServer?.notifyToolsChanged();
         void syncPluginThumbnailExtensions().catch((error) => {
           logger?.error('plugin.thumbnail-extensions', error, { libraryId });
         });
@@ -5841,10 +2232,6 @@ async function startApplication(): Promise<void> {
         });
       },
       logger,
-    });
-    pluginMcpToolProvider = new PluginMcpToolProvider({
-      activationCoordinator: pluginActivationCoordinator,
-      exposureStore: pluginMcpExposureStore,
     });
     pluginJobScheduler = new PluginJobScheduler({
       supervisor: pluginRuntimeSupervisor,
@@ -5942,132 +2329,18 @@ async function startApplication(): Promise<void> {
     });
   }
   if (!automationExecutionJournal || !automationCommandGateway || !workerClient || !logger) {
-    throw new Error('Embedded MCP server requires journal, gateway, worker, and logger.');
+    throw new Error('HTTP API requires journal, gateway, worker, and logger.');
   }
-  try {
-    embeddedMcpServer = new EmbeddedMcpServer({
-      userDataPath: app.getPath('userData'),
-      journal: automationExecutionJournal,
-      gateway: automationCommandGateway,
-      workerClient,
-      logger,
-      getPluginTools: () => pluginMcpToolProvider,
-      permissionPolicyStore: mcpPermissionPolicyStore,
-      permissionBroker: mcpPermissionBroker,
-      // Serpent-fmbr: MCP operations speak through the SAME human-facing toasts
-      // as manual operations — the renderer composes them from the structured
-      // result. No separate "MCP client completed X" notification system.
-      onCommandCompleted: ({ commandId, result }) => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        mainWindow.webContents.send(COMMAND_COMPLETED_CHANNEL, { commandId, result });
-      },
-    });
-    embeddedMcpServer.onSnapshot((snapshot) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        const validatedSnapshot = mcpSettingsSnapshotSchema.parse(snapshot);
-        mainWindow.webContents.send(MCP_SETTINGS_EVENT_CHANNEL, validatedSnapshot);
-      }
-    });
-  } catch (error) {
-    // Serpent review: an unrecoverable MCP construction failure (e.g. the
-    // credential pepper ACL cannot be restricted on Windows) must disable the
-    // MCP service, never the whole app — the settings IPC answers
-    // MCP_SETTINGS_UNAVAILABLE while embeddedMcpServer stays undefined.
-    embeddedMcpInitializationFailure = error instanceof McpCredentialStoreError ? error : undefined;
-    logger?.error('mcp.embedded-server.construction-failed', error);
-  }
-  ipcMain.handle(MCP_SETTINGS_REQUEST_CHANNEL, async (event, input: unknown) => {
-    const server = embeddedMcpServer;
-    const response = (value: unknown) => mcpSettingsResponseSchema.parse(value);
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info('mcp.settings', 'Rejected MCP settings request.', { code: 'unauthorized_sender' });
-      return response({ ok: false, code: 'unauthorized_sender', message: 'The MCP settings request sender is not authorized.' });
-    }
-    if (!server) {
-      const failure = embeddedMcpInitializationFailure;
-      logger?.info('mcp.settings', 'MCP service is unavailable after initialization failed.', {
-        code: failure?.code ?? 'MCP_SETTINGS_UNAVAILABLE',
-        ...(failure?.systemCode === undefined ? {} : { systemCode: failure.systemCode }),
-      });
-      return response({
-        ok: false,
-        code: failure?.code ?? 'MCP_SETTINGS_UNAVAILABLE',
-        message: failure?.message ?? 'MCP settings are unavailable.',
-        ...(failure === undefined ? {} : {
-          details: {
-            filePath: failure.filePath,
-            ...(failure.systemCode === undefined ? {} : { systemCode: failure.systemCode }),
-            ...(failure.recoveryCode === undefined ? {} : { recoveryCode: failure.recoveryCode }),
-          },
-        }),
-      });
-    }
-    const parsed = mcpSettingsRequestSchema.safeParse(input);
-    if (!parsed.success) {
-      return response({ ok: false, code: 'MCP_INVALID_REQUEST', message: 'The MCP settings request is invalid.', snapshot: server.snapshot() });
-    }
-    const request: McpSettingsRequest = parsed.data;
-    try {
-      if (request.type === 'get') return response({ ok: true, snapshot: server.snapshot() });
-      if (request.type === 'set-auto-start') return response({ ok: true, snapshot: await server.setAutoStart(request.enabled) });
-      if (request.type === 'set-access-mode') {
-        if (request.mode === 'full-access') {
-          const credential = server.snapshot().credentials.find(
-            (candidate) => candidate.credentialId === request.credentialId,
-          );
-          if (credential === undefined || credential.revokedAt !== null) {
-            return response({
-              ok: false,
-              code: 'MCP_CLIENT_UNAUTHORIZED',
-              message: 'The MCP client credential is unavailable.',
-              snapshot: server.snapshot(),
-            });
-          }
-          if (!(await confirmEnableAllMcpPermissions(credential.label))) {
-            return response({
-              ok: false,
-              code: 'MCP_PERMISSION_CONFIRMATION_CANCELLED',
-              message: 'The permission change was cancelled.',
-              snapshot: server.snapshot(),
-            });
-          }
-        }
-        return response({ ok: true, snapshot: await server.setAccessMode(request.credentialId, request.mode) });
-      }
-      if (request.type === 'set-port') return response({ ok: true, snapshot: await server.setPort(request.port) });
-      if (request.type === 'start') return response({ ok: true, snapshot: await server.start() });
-      if (request.type === 'stop') return response({ ok: true, snapshot: await server.stop() });
-      if (request.type === 'enable') return response({ ok: true, snapshot: await server.setEnabled(request.enabled) });
-      if (request.type === 'revoke-credential') {
-        return response({ ok: true, snapshot: await server.revokeCredential(request.credentialId) });
-      }
-      if (request.type === 'rename-credential') {
-        return response({ ok: true, snapshot: server.renameCredential(request.credentialId, request.label) });
-      }
-      if (request.type === 'copy-agent-connection') {
-        const copied = await server.copyAgentConnection(request.credentialId, request.format);
-        clipboard.writeText(copied.connectionText);
-        return response({
-          ok: true,
-          copied: true,
-          credentialId: copied.credentialId,
-          snapshot: copied.snapshot,
-        });
-      }
-      const config = await server.createClientConfig(request.input.format, request.input.label);
-      clipboard.writeText(config.connectionText);
-      return response({ ok: true, copied: true, credentialId: config.credentialId, snapshot: config.snapshot });
-    } catch (error) {
-      const code = error instanceof EmbeddedMcpServerError ? error.code : 'MCP_SERVER_START_FAILED';
-      logger?.error('mcp.settings', error, { code });
-      return response({
-        ok: false,
-        code,
-        message: error instanceof EmbeddedMcpServerError ? error.message : 'The MCP operation failed.',
-        snapshot: server.snapshot(),
-      });
-    }
+  // One long-lived operator execution backs every HTTP API call. The bearer
+  // token holder is the operator: full capabilities, no interactive approval —
+  // the audit journal and idempotency store still record everything.
+  let operatorExecution = automationExecutionJournal.create({
+    source: 'http',
+    libraryId: null,
+    declaredCapabilities: automationCapabilityRegistry.map((capability) => capability.capability),
+    initialGrantedCapabilities: automationCapabilityRegistry.map((capability) => capability.capability),
   });
+  automationExecutionJournal.start(operatorExecution.executionId);
   // Global user-scoped plugins have an application lifetime and must be set up
   // before recent-library restore, including when no library can be reopened.
   await pluginActivationCoordinator?.refreshGlobal();
@@ -6145,7 +2418,6 @@ async function startApplication(): Promise<void> {
     ) {
       // Cover-only video semantics skips a clip until its poster exists.
       // A ready cover is the cue to encode that clip; there is no frame-sampling fallback.
-      embeddingTestIndex?.catchUp(event.libraryId);
     }
     if (
       event.type === "asset.thumbnail.ready" ||
@@ -6157,7 +2429,8 @@ async function startApplication(): Promise<void> {
       // requests in a pure browse profile; the first screen is warmed by the
       // browse response itself and anything else resolves on demand.
     }
-    sendToLiveWebContents(mainWindow?.webContents, THUMBNAIL_CHANNEL, event);
+    // Headless: thumbnail completion is persisted by the worker; no live
+    // viewer to push the event to.
   });
 
   // Register serpent:// custom protocol for serving thumbnail/preview artifacts.
@@ -6572,62 +2845,6 @@ async function startApplication(): Promise<void> {
     }
   });
 
-  protocol.handle("serpent-plugin", async (request) => {
-    const parsed = parsePluginUiAssetRequestFromNavigation(
-      request.url,
-      request.headers.get("referer") ?? request.headers.get("Referer"),
-    );
-    if (parsed === undefined) {
-      return new Response("Invalid plugin UI URL", { status: 400 });
-    }
-    const resolved = pluginActivationCoordinator?.resolvePluginUiAsset(parsed);
-    if (resolved === undefined) {
-      logger?.info("plugin-ui.protocol-rejected", "Rejected an inactive or unallowlisted plugin UI asset.", {
-        pluginId: parsed.pluginId,
-        instanceId: parsed.instanceId,
-        contributionId: parsed.contributionId,
-      });
-      return new Response("Plugin UI asset not found", { status: 404 });
-    }
-    try {
-      let body: Buffer = await readFile(resolved.absolutePath);
-      const contentType = pluginUiMimeType(parsed.relativePath);
-      if (contentType.startsWith("text/html")) {
-        body = Buffer.from(
-          rewritePluginUiHtmlAssetUrls(body.toString("utf8"), request.url),
-          "utf8",
-        );
-      }
-      const pluginOrigin = `serpent-plugin://${parsed.pluginId}`;
-      return new Response(new Uint8Array(body), {
-        headers: {
-          "cache-control": "no-store",
-          "content-security-policy": [
-            "default-src 'none'",
-            `script-src 'self' ${pluginOrigin}`,
-            `style-src 'self' ${pluginOrigin} 'unsafe-inline'`,
-            `img-src 'self' ${pluginOrigin} data:`,
-            `font-src 'self' ${pluginOrigin}`,
-            `media-src 'self' ${pluginOrigin} data:`,
-            "connect-src 'none'",
-            "object-src 'none'",
-            "base-uri 'none'",
-            "form-action 'none'",
-            "frame-src 'none'",
-          ].join("; "),
-          "content-type": contentType,
-          "x-content-type-options": "nosniff",
-        },
-      });
-    } catch (error) {
-      logger?.error("plugin-ui.protocol-read", error, {
-        pluginId: parsed.pluginId,
-        contributionId: parsed.contributionId,
-        relativePath: parsed.relativePath,
-      });
-      return new Response("Plugin UI asset unavailable", { status: 404 });
-    }
-  });
 
   // 主进程事件循环滞后监控（SERPENT_LAG_LOG=1）：Main 也是单线程。若 Main 被
   // 同步工作堵住，Renderer 的 IPC 会迟迟不返回，表现就是「切换资源库卡住」，
@@ -6644,765 +2861,98 @@ async function startApplication(): Promise<void> {
     }, 1_000);
     lagTimer.unref?.();
   }
-  ipcMain.handle(LIBRARY_REQUEST_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      return {
-        ok: false,
-        error: createPublicError("INTERNAL_ERROR"),
-      } satisfies RendererResult;
+  // Start the HTTP API server (the machine-facing surface).
+  try {
+    const { token, created, filePath } = readOrCreateApiToken(app.getPath("userData"));
+    if (created) {
+      // First boot: surface the token in the log once so operators can grab it.
+      logger?.info("http-api.token", "Generated a new API bearer token.", { filePath, token });
+    } else {
+      logger?.info("http-api.token", "API bearer token available.", { filePath });
     }
-    return handleLibraryRequest(input, {
-      consumerId: performanceConsumerIdForWindow(event.sender.id),
-    });
-  });
-
-  ipcMain.on(ASSET_NATIVE_DRAG_CHANNEL, (event, input: unknown) => {
-    const dragWindow = mainWindow;
-    if (
-      !dragWindow ||
-      dragWindow.isDestroyed() ||
-      event.sender !== dragWindow.webContents
-    ) {
-      return;
-    }
-    try {
-      const request = parseNativeAssetDragRequest(input);
-      startNativeAssetDrag({
-        cache: nativeAssetDragCache,
-        libraryId: request.libraryId,
-        assetIds: request.assetIds,
-        imageFactory: nativeImage,
-        fallbackIcon: appIconImage,
-        startDrag: ({ file, files, icon }) => {
-          dragWindow.webContents.startDrag({
-            file,
-            files: [...files],
-            icon: icon as NativeImage,
-          });
-        },
-      });
-    } catch (error) {
-      logger?.info(
-        "main.native-asset-drag",
-        "Native asset drag was not started.",
-        { error: error instanceof Error ? error.message : String(error) },
-      );
-    }
-  });
-
-  ipcMain.on(ASSET_NATIVE_DRAG_PRIME_CHANNEL, (event, input: unknown) => {
-    if (
-      !mainWindow ||
-      mainWindow.isDestroyed() ||
-      event.sender !== mainWindow.webContents
-    ) {
-      return;
-    }
-    try {
-      const request = parseNativeAssetDragRequest(input);
-      void nativeAssetDragPrimer.primeImmediately(
-        request.libraryId,
-        request.assetIds,
-        "upsert",
-      );
-    } catch (error) {
-      logger?.info(
-        "main.native-asset-drag",
-        "Native asset drag was not primed.",
-        { error: error instanceof Error ? error.message : String(error) },
-      );
-    }
-  });
-
-  registerAutomationScriptIpc({
-    ipcMain,
-    isAuthorizedSender: (sender) => Boolean(mainWindow && sender === mainWindow.webContents),
-    workerClient: () => workerClient,
-    journal: () => automationExecutionJournal,
-    gateway: () => automationCommandGateway,
-    runtime: () => scriptRuntimeSupervisor,
-    scriptFiles: () => automationScriptFiles,
-    confirmDesktopWrite: confirmDesktopAutomationWrite,
-    logger: () => logger,
-    undoGroup: () => ({
-      recover: async ({ libraryId, items }) => {
-        let undoneCount = 0;
-        let skippedCount = 0;
-        for (const item of [...items].reverse()) {
-          if (!item.reversible) throw new Error('This automation undo item is not reversible.');
-          const result = item.kind === 'asset.move'
-            ? await activeWorkerClient.request({
-              type: 'asset.move-undo',
-              libraryId,
-              operationId: item.reference,
-              conflictStrategy: 'error',
-            })
-            : item.kind === 'asset.trash'
-              ? await activeWorkerClient.request({
-                type: 'asset.trash-undo',
-                libraryId,
-                operationId: item.reference,
-              })
-              : undefined;
-          if (!result) throw new Error(`Automation undo is not supported for ${item.kind}.`);
-          if (!result.ok) throw new Error('Automation undo failed.');
-          if (result.type === 'asset.move-undone') {
-            undoneCount += result.undoneCount;
-            skippedCount += result.skippedCount;
-          } else if (result.type === 'asset.trash-undone') {
-            undoneCount += result.restoredCount;
-            skippedCount += result.skippedCount;
-          } else {
-            throw new Error('Automation undo returned an unexpected result.');
-          }
-        }
-        return { undoneCount, skippedCount };
-      },
-    }),
-  });
-
-  const pluginPackageRequest = pluginPackageManager === undefined
-    ? undefined
-    : createPluginPackageRequestHandler({
-      manager: pluginPackageManager,
-      communityCatalog: new PluginCommunityCatalogStore({
-        userDataDirectory: app.getPath('userData'),
-      }),
-      activationCoordinator: pluginActivationCoordinator,
-      settingsStore: pluginSettingsStore,
-      storageStore: pluginStorageStore,
-      mcpExposureStore: pluginMcpExposureStore,
-      searchProviders: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin search providers are unavailable.');
-        }
-        return pluginProviderScheduler.searchAssets(input);
-      },
-      mediaProvider: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin media providers are unavailable.');
-        }
-        return pluginProviderScheduler.resolveMediaProvider(input);
-      },
-      metadataProvider: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin metadata providers are unavailable.');
-        }
-        return pluginProviderScheduler.resolveMetadataProvider(input);
-      },
-      importProvider: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin import providers are unavailable.');
-        }
-        return pluginProviderScheduler.resolveImportProvider(input);
-      },
-      exportProvider: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin export providers are unavailable.');
-        }
-        return pluginProviderScheduler.resolveExportProvider(input);
-      },
-      aiProvider: async (input) => {
-        if (pluginProviderScheduler === undefined) {
-          throw new Error('Plugin AI providers are unavailable.');
-        }
-        return pluginProviderScheduler.resolveAiProvider(input);
-      },
-      resolveLibraryDirectory: async (libraryId) => {
-        const client = workerClient;
-        if (client === undefined) return undefined;
-        const result = await client.request({ type: 'library.list' });
-        if (!result.ok || result.type !== 'library.list') return undefined;
-        return result.libraries.find((library) => library.libraryId === libraryId)?.libraryPath;
-      },
-      chooseLocalPackage: selectPluginPackageForInstall,
-      notifyInstallProgress: (event) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(PLUGIN_INSTALL_PROGRESS_CHANNEL, event);
-        }
-      },
-      revealPackageDirectory: (absoluteDirectory) => {
-        shell.showItemInFolder(absoluteDirectory);
-      },
-      afterMutation: async ({ requestType, libraryId, libraryDirectory }) => {
-        const coordinator = pluginActivationCoordinator;
-        if (coordinator === undefined) return;
+    const httpHost = process.env.SERPENT_HTTP_HOST === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
+    const configuredPort = Number(process.env.SERPENT_HTTP_PORT ?? "");
+    httpApiServer = await createHttpApiServer({
+      port: Number.isSafeInteger(configuredPort) && configuredPort > 0 ? configuredPort : HTTP_API_DEFAULT_PORT,
+      host: httpHost,
+      token,
+      appVersion: app.getVersion(),
+      gateway: automationCommandGateway!,
+      getExecutionContext: () => {
+        const journal = automationExecutionJournal;
+        if (journal === undefined) return undefined;
+        const active = journal.resolve(operatorExecution.executionId);
+        if (active !== undefined) return active;
+        // The operator execution hit its wall-clock budget; roll it forward so
+        // the API stays live without a service restart.
         try {
-          if (requestType === 'plugin-manager.resolve'
-            || requestType === 'plugin-manager.safe-mode'
-            || requestType === 'plugin-manager.install-local'
-            || requestType === 'plugin-manager.install-github'
-            || requestType === 'plugin-manager.install-community'
-            || requestType === 'plugin-manager.uninstall'
-            || requestType === 'plugin-manager.trust'
-            || requestType === 'plugin-manager.reload') {
-            // Enable/disable (especially user-scoped) and package lifecycle can
-            // change contributions in every open library Host.
-            await coordinator.refreshOpenLibraries();
-          } else if (libraryId !== undefined && libraryDirectory !== undefined) {
-            await coordinator.refreshLibrary({ libraryId, libraryDirectory });
-          }
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(PLUGIN_CONTRIBUTIONS_CHANGED_CHANNEL, {
-              libraryId: libraryId ?? null,
-              requestType,
-            });
-          }
-          embeddedMcpServer?.notifyToolsChanged();
+          const renewed = journal.create({
+            source: 'http',
+            libraryId: null,
+            declaredCapabilities: automationCapabilityRegistry.map((capability) => capability.capability),
+            initialGrantedCapabilities: automationCapabilityRegistry.map((capability) => capability.capability),
+          });
+          journal.start(renewed.executionId);
+          operatorExecution = renewed;
+          logger?.info('http-api.execution-renewed', 'Renewed the HTTP API operator execution.', {
+            executionId: renewed.executionId,
+          });
+          return journal.resolve(renewed.executionId);
         } catch (error) {
-          logger?.error('plugin.activation.after-mutation', error, { requestType, libraryId });
+          logger?.error('http-api.execution-renew', error);
+          return undefined;
         }
       },
-      logger,
-    });
-  ipcMain.handle(PLUGIN_MANAGER_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || pluginPackageRequest === undefined) {
-      logger?.info('plugin.ipc', 'Rejected plugin manager request.', {
-        reason: pluginPackageRequest === undefined ? 'unavailable' : 'unauthorized-sender',
-      });
-      return { ok: false, code: 'operation-failed' };
-    }
-    return pluginPackageRequest(input);
-  });
-
-  ipcMain.handle(STARTUP_PREFERENCES_GET_CHANNEL, (event): StartupPreferencesSnapshot => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      return readStartupPreferencesSnapshot();
-    }
-    return readStartupPreferencesSnapshot();
-  });
-
-  ipcMain.handle(SHORTCUT_BINDINGS_GET_CHANNEL, (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      return readShortcutBindingsSnapshot();
-    }
-    return readShortcutBindingsSnapshot();
-  });
-
-  ipcMain.handle(
-    SHORTCUT_BINDINGS_EXPORT_CHANNEL,
-    async (event): Promise<ShortcutFileExportResult> => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        return { ok: false, error: "unauthorized-sender" };
-      }
-      return exportShortcutBindingsFile();
-    },
-  );
-
-  ipcMain.handle(
-    SHORTCUT_BINDINGS_IMPORT_CHANNEL,
-    async (event): Promise<ShortcutFileImportResult> => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        return { ok: false, error: "unauthorized-sender" };
-      }
-      return importShortcutBindingsFile();
-    },
-  );
-
-  ipcMain.handle(
-    SHORTCUT_BINDINGS_SET_CHANNEL,
-    (event, input: unknown): ShortcutBindingsSetResult => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info("ipc.shortcuts", "Rejected shortcut update.", {
-          code: "unauthorized-sender",
-        });
-        return {
-          ok: false,
-          bindings: readShortcutBindingsSnapshot(),
-          error: "unauthorized-sender",
-        };
-      }
-      try {
-        return storeShortcutBindings(input);
-      } catch (error) {
-        logger?.error("shortcuts.store", error);
-        return {
-          ok: false,
-          bindings: readShortcutBindingsSnapshot(),
-          error: "shortcut-save-failed",
-        };
-      }
-    },
-  );
-
-  ipcMain.handle(STARTUP_PREFERENCES_SET_CHANNEL, (event, input: unknown): StartupPreferencesSnapshot => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info("ipc.startup-preferences", "Rejected startup preference update.", {
-        code: "unauthorized-sender",
-      });
-      return readStartupPreferencesSnapshot();
-    }
-    try {
-      return storeStartupPreferences(input);
-    } catch (error) {
-      logger?.error("startup.login-item", error);
-      return {
-        ...readStartupPreferencesSnapshot(),
-        registrationFailed: true,
-      };
-    }
-  });
-
-  ipcMain.handle(
-    APP_UPDATE_CHECK_CHANNEL,
-    async (event): Promise<AppUpdateCheckResult> => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info('ipc.app-update', 'Rejected update check request.', {
-          code: 'unauthorized-sender',
-        });
-        return { ok: false, status: 'error', code: 'unauthorized-sender' };
-      }
-      if (appUpdateService === undefined) {
-        return { ok: false, status: 'error', code: 'service-unavailable' };
-      }
-      return appUpdateService.checkForUpdates();
-    },
-  );
-
-  ipcMain.handle(
-    APP_UPDATE_INSTALL_CHANNEL,
-    async (event): Promise<AppUpdateInstallResult> => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info('ipc.app-update', 'Rejected update install request.', {
-          code: 'unauthorized-sender',
-        });
-        return { ok: false, status: 'error', code: 'unauthorized-sender' };
-      }
-      if (appUpdateService === undefined) {
-        return { ok: false, status: 'error', code: 'service-unavailable' };
-      }
-      const result = await appUpdateService.downloadAndInstall();
-      if (result.ok && result.action === 'installer-opened') {
-        beginUpdateHandoff();
-        setImmediate(() => {
-          app.quit();
-        });
-      }
-      return result;
-    },
-  );
-
-  ipcMain.on(APP_UPDATE_CANCEL_CHANNEL, (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info('ipc.app-update', 'Rejected update cancel request.', {
-        code: 'unauthorized-sender',
-      });
-      return;
-    }
-    appUpdateService?.cancelDownload();
-  });
-
-  // 渲染进程请求在系统浏览器打开外部链接（检查器「源链接」跳转）。
-  // 发送者与 URL 双重校验，仅放行不含凭据的 HTTP(S)。失败回传公开错误码；日志不含 URL。
-  ipcMain.handle(
-    OPEN_EXTERNAL_URL_CHANNEL,
-    async (event, input: unknown): Promise<OpenExternalUrlResult> => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info("ipc.open-external-url", "Rejected open-external-url request.", {
-          code: "unauthorized_sender",
-        });
-        return { ok: false, code: "unauthorized_sender" };
-      }
-      const resolved = resolveOpenExternalUrlTarget(input);
-      if (!resolved.ok) {
-        logger?.info("ipc.open-external-url", "Rejected open-external-url request.", {
-          code: resolved.code,
-        });
-        return resolved;
-      }
-      try {
-        await shell.openExternal(resolved.url);
-        return { ok: true };
-      } catch (error) {
-        logger?.error("ipc.open-external-url", error, { code: "shell_failure" });
-        return { ok: false, code: "shell_failure" };
-      }
-    },
-  );
-
-  // Reveal serpent.log in the file manager without exposing the path to Renderer.
-  ipcMain.handle(
-    REVEAL_APP_LOG_CHANNEL,
-    (event): RevealAppLogResult => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info("ipc.reveal-app-log", "Rejected reveal-app-log request.", {
-          code: "unauthorized_sender",
-        });
-        return { ok: false, code: "unauthorized_sender" };
-      }
-      if (!appLogPath || !existsSync(appLogPath)) {
-        logger?.info("ipc.reveal-app-log", "App log file missing.", {
-          code: "log_missing",
-        });
-        return { ok: false, code: "log_missing" };
-      }
-      try {
-        shell.showItemInFolder(appLogPath);
-        return { ok: true };
-      } catch (error) {
-        logger?.error("ipc.reveal-app-log", error, { code: "shell_failure" });
-        return { ok: false, code: "shell_failure" };
-      }
-    },
-  );
-
-  // Read only the recent, already-redacted entries for the in-app diagnostics view.
-  // The absolute log path remains Main-owned and never crosses the bridge.
-  ipcMain.handle(
-    READ_APP_LOG_CHANNEL,
-    (event, input: unknown): ReadAppLogResult => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info("ipc.read-app-log", "Rejected read-app-log request.", {
-          code: "unauthorized_sender",
-        });
-        return { ok: false, code: "unauthorized_sender" };
-      }
-      const request = parseReadAppLogRequest(input);
-      if (!request) {
-        logger?.info("ipc.read-app-log", "Rejected malformed app-log filter.", {
-          code: "malformed_request",
-        });
-        return { ok: false, code: "malformed_request" };
-      }
-      if (!appLogPath || !existsSync(appLogPath)) {
-        logger?.info("ipc.read-app-log", "App log file missing.", {
-          code: "log_missing",
-        });
-        return { ok: false, code: "log_missing" };
-      }
-      try {
-        return {
-          ok: true,
-          entries: logger?.readRecent(500, {
-            redactPaths: true,
-            automationCorrelationId: request.automationCorrelationId,
-          }) ?? [],
-          fileName: path.basename(appLogPath),
-        };
-      } catch (error) {
-        logger?.error("ipc.read-app-log", error, { code: "read_failure" });
-        return { ok: false, code: "read_failure" };
-      }
-    },
-  );
-
-  // 文本输入右键：仅授权主窗口弹出 role 编辑菜单；Renderer 只传坐标。
-  ipcMain.handle(
-    SHOW_EDIT_CONTEXT_MENU_CHANNEL,
-    (event, input: unknown): ShowEditContextMenuResult => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        logger?.info("ipc.show-edit-context-menu", "Rejected edit context menu.", {
-          code: "unauthorized_sender",
-        });
-        return { ok: false, code: "unauthorized_sender" };
-      }
-      const result = popupEditContextMenu(event.sender, input);
-      if (!result.ok) {
-        logger?.info("ipc.show-edit-context-menu", "Rejected edit context menu.", {
-          code: result.code,
-        });
-      }
-      return result;
-    },
-  );
-
-  // Serpent-166q: text-field ⌘C fallback when Edit menu routes through renderer.
-  ipcMain.handle(NATIVE_EDIT_COPY_CHANNEL, (event): void => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return;
-    event.sender.copy();
-  });
-  ipcMain.handle(NATIVE_EDIT_COMMAND_CHANNEL, (event, input: unknown): void => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return;
-    if (input === "paste") event.sender.paste();
-    if (input === "select-all") event.sender.selectAll();
-  });
-
-  // Bootstrap dialog locale from OS before Renderer syncs (Serpent-bwb).
-  appLocale = mapSystemLocaleToAppLocale(app.getLocale());
-
-  ipcMain.on(APP_LOCALE_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info("ipc.app-locale", "Rejected app-locale update.", {
-        code: "unauthorized_sender",
-      });
-      return;
-    }
-    const parsed = tryParseAppLocaleSync(input);
-    if (!parsed.ok) {
-      logger?.info("ipc.app-locale", "Dropped malformed app-locale update.", {
-        code: parsed.code,
-        issuePaths: parsed.issuePaths,
-      });
-      return;
-    }
-    appLocale = parsed.locale;
-    installApplicationMenu({
-      locale: appLocale,
-      recentLibraries: nativeMenuRecentLibraries(),
-      shortcutBindings: readShortcutBindingsSnapshot(),
-    });
-    windowsTray?.updateLocale(appLocale);
-  });
-
-  // Serpent-q0b1: the renderer syncs native menu item enabled-state (business
-  // undo/redo availability). Only commands from the real window are accepted.
-  ipcMain.handle(LINKED_MISSING_VISIBILITY_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return;
-    if (typeof input !== "boolean") return;
-    showMissingLinkedFiles = input;
-    workerClient?.publishShowMissingLinkedFiles(input);
-    setApplicationMenuCommandChecked("library.show-missing-linked", input);
-  });
-
-  ipcMain.handle(APPLICATION_MENU_ITEM_STATE_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      return;
-    }
-    const record = input as { command?: unknown; enabled?: unknown; label?: unknown } | null;
-    if (record === null || typeof record !== "object") return;
-    if (typeof record.command !== "string") return;
-    if (typeof record.enabled === "boolean") {
-      setApplicationMenuCommandEnabled(record.command, record.enabled);
-    }
-    if (typeof record.label === "string" && record.label.length > 0 && record.label.length <= 200) {
-      setApplicationMenuCommandLabel(record.command, record.label);
-    }
-  });
-
-  ipcMain.on(ACTIVE_CONTEXT_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info("ipc.active-context", "Rejected active-context update.", {
-        code: "unauthorized_sender",
-      });
-      return;
-    }
-    const parsed = tryParseActiveContext(input);
-    if (!parsed.ok) {
-      logger?.info("ipc.active-context", "Dropped malformed active-context update.", {
-        code: parsed.code,
-        issuePaths: parsed.issuePaths,
-      });
-      return;
-    }
-    const windowId = BrowserWindow.fromWebContents(event.sender)?.id;
-    if (windowId !== undefined) {
-      focusedContexts.set(windowId, parsed.context);
-      if (parsed.context.libraryId) {
-        lastExtensionTargetWindowId = windowId;
-      }
-      if (
-        extensionBrowseFoldersStorePath &&
-        parsed.context.libraryId &&
-        parsed.context.selectedFolderId
-      ) {
-        recordExtensionBrowseFolder(
-          extensionBrowseFoldersStorePath,
-          parsed.context.libraryId,
-          parsed.context.selectedFolderId,
-        );
-      }
-    }
-  });
-
-  ipcMain.on(BROWSE_SHORTCUT_MENU_ENABLED_CHANNEL, (_event, input: unknown) => {
-    const enabled =
-      typeof input === "object" &&
-      input !== null &&
-      "enabled" in input &&
-      Boolean((input as { enabled?: unknown }).enabled);
-    setWindowsBrowseShortcutAcceleratorsEnabled(enabled);
-  });
-
-  ipcMain.on(APPLICATION_SHORTCUTS_ENABLED_CHANNEL, (event, input: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return;
-    const enabled =
-      typeof input === "object" &&
-      input !== null &&
-      "enabled" in input &&
-      Boolean((input as { enabled?: unknown }).enabled);
-    setWindowsApplicationShortcutAcceleratorsEnabled(enabled);
-  });
-
-  ipcMain.on(VIEWER_VIDEO_SHORTCUTS_ACTIVE_CHANNEL, (event, input: unknown) => {
-    const scope = typeof input === "object" && input !== null && "scope" in input
-      && (input as { scope?: unknown }).scope === "viewer.audio"
-      ? "viewer.audio"
-      : "viewer.video";
-    const active =
-      typeof input === "object" &&
-      input !== null &&
-      "active" in input &&
-      Boolean((input as { active?: unknown }).active);
-    setViewerVideoShortcutCaptureActive(
-      event.sender,
-      active,
-      readShortcutBindingsSnapshot(),
-      scope,
-    );
-  });
-
-  ipcMain.on(PLUGIN_INPUT_CAPTURE_EVENT_CHANNEL, (event, payload: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info('ipc.plugin-input-capture', 'Rejected input capture event.', {
-        code: 'unauthorized_sender',
-      });
-      return;
-    }
-    const parsed = parsePluginInputCapturePublishPayload(payload);
-    if (parsed === null) return;
-    const result = pluginInputCaptureBroker?.publish(parsed);
-    if (result === 'queued') schedulePluginInputCaptureFlush();
-    if (result === 'released') publishPluginInputCaptureSessionsToRenderer();
-  });
-
-  ipcMain.on(PLUGIN_INPUT_CAPTURE_SYSTEM_MODAL_CHANNEL, (event, payload: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
-      logger?.info('ipc.plugin-input-capture', 'Rejected system modal seam.', {
-        code: 'unauthorized_sender',
-      });
-      return;
-    }
-    const parsed = parsePluginInputCaptureSystemModalPayload(payload);
-    if (parsed === null) return;
-    pluginInputCaptureBroker?.setSystemModalActive(parsed.active);
-  });
-
-  // Install before the first window so macOS does not keep Electron's default
-  // View→Zoom accelerators that steal Cmd+=/-/0 (Serpent-46i9).
-  // Windows: hides menu bar for frameless shell (Serpent-znex).
-  installApplicationMenu({
-    locale: appLocale,
-    recentLibraries: nativeMenuRecentLibraries(),
-    shortcutBindings: readShortcutBindingsSnapshot(),
-  });
-
-  registerWindowControls({
-    getMainWindow: () => mainWindow,
-    logger,
-  });
-
-  const startupPreferences = readStartupPreferences(startupPreferencesPath());
-  if (startupPreferences.openAtLogin) {
-    try {
-      applyStartupLoginItem({
-        platform: process.platform,
-        packaged: app.isPackaged,
-        e2e: process.env.SERPENT_E2E === "1",
-        preferences: startupPreferences,
-        setLoginItemSettings: (settings) => {
-          app.setLoginItemSettings({
-            openAtLogin: settings.openAtLogin,
-            ...(settings.args === undefined ? {} : { args: [...settings.args] }),
-            ...(settings.enabled === undefined ? {} : { enabled: settings.enabled }),
-          });
-        },
-      });
-    } catch (error) {
-      logger?.error("startup.login-item", error);
-    }
-  }
-
-  await createMainWindow();
-  try {
-    await embeddedMcpServer?.initialize();
-  } catch (error) {
-    logger?.error('mcp.server.initialize', error);
-  }
-  windowsTray = createWindowsTray({
-    getMainWindow: () => mainWindow,
-    onQuit: () => app.quit(),
-    locale: appLocale,
-  });
-
-  extensionBrowseFoldersStorePath = path.join(
-    app.getPath("userData"),
-    "extension-recent-browse-folders.json",
-  );
-
-  // Start the browser-extension HTTP server on 127.0.0.1.
-  try {
-    extensionServer = await createExtensionServer({
-      port: 19876,
-      uploadStagingRoot: app.getPath("temp"),
-      onListFolders: handleListFolders,
-      onListCollections: handleListCollections,
-      onSaveIntent: handleSaveIntent,
-      onSaveUpload: handleSaveUpload,
-      onError: (err) => logger?.error("extension-server", err),
+      getLibraryChangeSequence: (libraryId) => libraryChangeSequences.get(libraryId),
+      logger: {
+        info: (scope, message, context) => logger?.info(scope, message, context),
+        error: (scope, error, context) => logger?.error(scope, error, context),
+      },
+      onError: (err) => logger?.error("http-api", err),
     });
     logger?.info(
-      "extension-server",
-      `Browser extension server started on port ${extensionServer.port}.`,
+      "http-api",
+      `HTTP API server started on ${httpHost}:${httpApiServer.port} (docs at /docs).`,
     );
   } catch (error) {
-    logger?.error("extension-server", error);
-    // Extension server failure is non-fatal; the app continues without it.
+    // API failure is non-fatal for boot, but the backend loses its primary
+    // surface — log loudly.
+    logger?.error("http-api", error);
   }
 
   initializePreviewCache();
 
-  startupComplete = true;
+  // Headless bootstrap: with no UI to drive library opening, restore the most
+  // recent library so the HTTP API and script surfaces have an active context
+  // immediately after startup.
+  await autoOpenRecentLibrary();
 }
 
-// Serpent-tluf: must run before app ready — the macOS application menu's
-// first item always displays the application name, and a ready-late
-// setName is too late for it (dev otherwise shows "Electron").
+// Serpent-tluf: must run before app ready.
 app.setName("Serpent");
 
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("browser-window-created", (_event, window) => {
-    suppressWindowDuringUpdateHandoff(window);
-  });
-
-  app.on("second-instance", handleSecondInstance);
-
   app
     .whenReady()
     .then(startApplication)
     .catch((error: unknown) => {
       logger?.error("main.startup", error);
-      dialog.showErrorBox(
-        "Serpent could not start",
-        toPublicError(error).message,
-      );
-      app.quit();
+      // Headless: no dialog surface; log loudly and exit non-zero.
+      process.stderr.write(`Serpent could not start: ${toPublicError(error).message}\n`);
+      app.exit(1);
     });
-
-  app.on("activate", () => {
-    if (!shouldHandleSecondaryLaunch({ updateHandoff, applicationQuitting })) return;
-    if (!startupComplete) return;
-    if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
-    else focusMainWindow();
-  });
-
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
-  });
 
   app.on("will-quit", () => {
-    void embeddingTestIndex?.close().catch((error) => {
-      logger?.error('embedding.local-index.close', error, { reason: 'application-quit' });
-    });
-    void embeddingHttpIndex?.close().catch((error) => {
-      logger?.error('embedding.http-index.close', error, { reason: 'application-quit' });
-    });
     void cleanupAllExternalSources();
     syncAutoScheduler?.stop();
     syncAutoScheduler = undefined;
-    windowsTray?.destroy();
-    windowsTray = undefined;
   });
 
   app.on("before-quit", (event) => {
-    applicationQuitting = true;
     aiQueueScheduler.clearAll();
-    criticalConfirmationWindowManager?.dispose();
-    criticalConfirmationWindowManager = undefined;
-    criticalConfirmationBroker?.dispose();
-    criticalConfirmationBroker = undefined;
-    if (quitAfterShutdown || (!workerClient && !embeddingTestIndex && !embeddingHttpIndex)) return;
+    if (quitAfterShutdown || !workerClient) return;
     event.preventDefault();
     if (applicationShutdownPromise) return;
 
@@ -7412,21 +2962,15 @@ if (!hasSingleInstanceLock) {
 
     pluginActivationCoordinator?.dispose('supervisor-shutdown');
 
-    // Close loopback listeners before the worker drain so an update handoff
-    // does not keep a port open while the installer starts the next process.
-    const mcpClose = releaseLoopbackListeners();
+    // Close loopback listeners before the worker drain so a service restart
+    // does not keep a port open while the next process starts.
+    const apiClose = releaseLoopbackListeners();
     // Stop model processes before app.exit(), which bypasses will-quit.
     applicationShutdownPromise = (async (): Promise<void> => {
-      const results = await Promise.allSettled([
-        mcpClose,
-        embeddingTestIndex?.close(),
-        embeddingHttpIndex?.close(),
-      ]);
-      for (const [index, result] of results.entries()) {
+      const results = await Promise.allSettled([apiClose]);
+      for (const result of results) {
         if (result.status !== "rejected") continue;
-        const source = ["automation.mcp.close", "embedding.local-index.close", "embedding.http-index.close"][index]
-          ?? "application.shutdown.close";
-        logger?.error(source, result.reason, { reason: "application-quit" });
+        logger?.error("http-api.close", result.reason, { reason: "application-quit" });
       }
       try {
         await workerClient?.shutdown();

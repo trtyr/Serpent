@@ -12,7 +12,7 @@ export const historyEntryStateSchema = z.enum([
 ]);
 export type HistoryEntryState = z.infer<typeof historyEntryStateSchema>;
 
-export const historySourceSchema = z.enum(['desktop', 'script', 'mcp', 'plugin']);
+export const historySourceSchema = z.enum(['desktop', 'script', 'mcp', 'plugin', 'http']);
 export type HistorySource = z.infer<typeof historySourceSchema>;
 
 export const historyPolicySchema = z.enum(['reversible', 'barrier']);

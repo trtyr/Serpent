@@ -23,7 +23,6 @@ import {
   listViewerOverlayContributions,
   listWorkspaceViewContributions,
   listUiDescriptorContributions,
-  listPluginUiFrameContributions,
   registerManifestContributions,
   type PluginContributionRegistry,
 } from '../plugins/plugin-contributions';
@@ -52,7 +51,6 @@ import type { PluginRuntimeSupervisor } from './plugin-runtime-supervisor';
 import type { PluginTrustedRuntimeSupervisor } from './plugin-trusted-runtime-supervisor';
 import type { InstalledPluginPackage } from './plugin-package-manager-types';
 import type { PluginRuntimeDeactivateReason } from '../shared/plugin-runtime-utility-protocol';
-import { resolvePluginUiAssetPath } from './plugin-ui-assets';
 import type { PluginDomainEvent } from '../plugins/plugin-domain-events';
 import type { PluginProviderRegistry, PluginProviderRegistration } from '../plugins/plugin-providers';
 
@@ -831,36 +829,6 @@ export class PluginActivationCoordinator {
       ...(contribution.entryPath === undefined ? {} : { entryPath: contribution.entryPath }),
       ...(themePackage === undefined ? {} : { themePackage }),
     };
-  }
-
-  resolvePluginUiAsset(input: {
-    libraryId: string;
-    pluginId: string;
-    instanceId: string;
-    contributionId: string;
-    relativePath: string;
-  }): { absolutePath: string; pluginId: string } | undefined {
-    const active = new Map<string, ActiveRecord>([
-      ...this.#activeGlobal,
-      ...(this.#activeByLibrary.get(input.libraryId) ?? new Map()),
-    ]);
-    const record = [...active.values()].find((candidate) =>
-      candidate.instanceId === input.instanceId && candidate.pluginId === input.pluginId);
-    if (record === undefined || this.options.contributions === undefined) return undefined;
-    // Settings / sidebar / inspector / viewer / dialog iframes share serpent-plugin://.
-    const contribution = listPluginUiFrameContributions(this.options.contributions)
-      .find((candidate) => candidate.id === input.contributionId
-        && candidate.pluginInstanceId === input.instanceId
-        && candidate.pluginId === input.pluginId);
-    if (contribution?.entryPath === undefined) return undefined;
-    const uiRoot = path.posix.dirname(contribution.entryPath);
-    if (input.relativePath !== contribution.entryPath
-      && !input.relativePath.startsWith(`${uiRoot}/`)) {
-      return undefined;
-    }
-    const absolutePath = resolvePluginUiAssetPath(record.packageDirectory, input.relativePath);
-    if (absolutePath === undefined) return undefined;
-    return { absolutePath, pluginId: record.pluginId };
   }
 
   pluginUiStoragePermissions(input: {

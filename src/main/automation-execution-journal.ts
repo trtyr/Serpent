@@ -31,7 +31,7 @@ export const automationExecutionStatusSchema = z.enum([
 
 export type AutomationExecutionStatus = z.infer<typeof automationExecutionStatusSchema>;
 
-const MCP_EXECUTION_MAX_WALL_TIME_MS = 30 * 60_000;
+const HTTP_EXECUTION_MAX_WALL_TIME_MS = 30 * 60_000;
 
 const nonBlankString = z.string().min(1).max(255).refine((value) => value.trim().length > 0, {
   message: 'Value must not be blank.',
@@ -516,8 +516,8 @@ export class AutomationExecutionJournal implements AutomationExecutionResolver {
     const nowDate = this.#clock();
     const now = nowDate.toISOString();
     const scriptHash = scriptSource === undefined ? null : hashScript(scriptSource);
-    const resourceBudget = source === 'mcp'
-      ? { ...this.#resourceBudget, maxWallTimeMs: MCP_EXECUTION_MAX_WALL_TIME_MS }
+    const resourceBudget = source === 'mcp' || source === 'http'
+      ? { ...this.#resourceBudget, maxWallTimeMs: HTTP_EXECUTION_MAX_WALL_TIME_MS }
       : { ...this.#resourceBudget };
     const initialGrantedCapabilities = normalizeCapabilities(z.array(automationCapabilitySchema).max(64).parse(
       input.initialGrantedCapabilities ?? [],
@@ -586,6 +586,7 @@ export class AutomationExecutionJournal implements AutomationExecutionResolver {
     const record = this.#find(executionId);
     if (!record || record.status !== 'validating') return record === undefined ? undefined : safeRecord(record);
     const preAuthorized = record.source === 'mcp'
+      || record.source === 'http'
       || (record.source === 'script'
       && record.scriptHash !== null
       && record.libraryId !== null

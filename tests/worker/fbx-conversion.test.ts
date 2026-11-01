@@ -12,8 +12,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Group, Mesh } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-import { applyBaseColorTextureAlpha } from '../../src/renderer/3d-viewer/base-color-alpha';
-import { applyDecodedRgbaTextures } from '../../src/renderer/3d-viewer/rgba-texture-chunk';
+import { applyBaseColorTextureAlpha } from '../../src/media-render/3d-viewer/base-color-alpha';
+import { applyDecodedRgbaTextures } from '../../src/media-render/3d-viewer/rgba-texture-chunk';
 import { readRgbaTextureChunk } from '../../src/shared/fbx-rgba-chunk';
 import { LibraryService } from '../../src/worker/library-service';
 import { convertFbxBuffer } from '../../src/worker/fbx/converter';

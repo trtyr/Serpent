@@ -146,12 +146,24 @@ if (!mainEntry) {
 // @electron/asar 的 listPackage 返回 path.join 风格的条目：Windows 上为
 // `\.vite\build\main.js`（反斜杠+前导分隔符），macOS 上为 `/.vite/build/main.js`；
 // 其内部遍历按 path.sep 分割，因此 extractFile 需要去掉前导分隔符、保留平台分隔符。
+// Resolve the automation Registry API version from source (single source of truth).
+const registrySource = readFileSync(
+  path.join(projectRoot, 'src', 'automation', 'command-registry.ts'),
+  'utf8',
+);
+const automationApiVersion = Number(
+  registrySource.match(/AUTOMATION_API_VERSION = (\d+)/u)?.[1] ?? Number.NaN,
+);
+if (!Number.isSafeInteger(automationApiVersion)) {
+  throw new Error('Could not resolve AUTOMATION_API_VERSION from src/automation/command-registry.ts.');
+}
+
 const mainSource = asar
   .extractFile(asarPath, mainEntry.replace(/^[\\/]+/u, ''))
   .toString('utf8');
-if (!mainSource.includes(`AUTOMATION_API_VERSION`) || !mainSource.includes(String(apiVersion))) {
+if (!mainSource.includes(`AUTOMATION_API_VERSION`) || !mainSource.includes(String(automationApiVersion))) {
   throw new Error(
-    `Packaged Main does not contain the Registry API version marker (expected ${apiVersion}).`,
+    `Packaged Main does not contain the Registry API version marker (expected ${automationApiVersion}).`,
   );
 }
 

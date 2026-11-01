@@ -58,10 +58,6 @@ const config: ForgeConfig = {
       // Recover ignored media executables from the pinned Serpent-Build
       // release when a clean checkout or a local replacement fails the gate.
       runNodeGate('scripts/media-binaries.mjs', ['ensure', '--platform', mediaPlatform]);
-      // The browser extension is not shipped to a store yet; it ships inside
-      // the app bundle (Contents/Resources/extension) for manual loading.
-      // Rebuild it so the package always carries the current sources.
-      runNodeGate('scripts/build-extension.mjs', []);
     },
     postPackage: async (_forgeConfig, packageResult) => {
       nativeMediaPlatform(packageResult.platform, packageResult.arch);
@@ -130,10 +126,6 @@ const config: ForgeConfig = {
     // checks against this copied directory.
     extraResource: [
       'resources',
-      // Browser extension bundle (manual-load distribution): installed at
-      // Serpent.app/Contents/Resources/extension (macOS) or
-      // resources/extension (Windows) so users can load it unpacked.
-      'dist/extension',
       'assets/icons/app-dock.png',
       'assets/icons/app.png',
       'assets/icons/app.ico',
@@ -169,22 +161,10 @@ const config: ForgeConfig = {
           target: 'main',
         },
         {
-          entry: 'src/preload/index.ts',
-          config: 'vite.preload.config.ts',
-          target: 'preload',
-        },
-        {
           // Slice E (Serpent-hnmg): dedicated bridge for the hidden offscreen
           // thumbnail window; emitted as `.vite/build/offscreen.js`.
           entry: 'src/preload/offscreen.ts',
           config: 'vite.offscreen-preload.config.ts',
-          target: 'preload',
-        },
-        {
-          // Critical confirmation child windows have a deliberately narrow
-          // bridge; they must not inherit the full application preload.
-          entry: 'src/preload/critical-confirmation.ts',
-          config: 'vite.critical-confirmation-preload.config.ts',
           target: 'preload',
         },
         {
@@ -208,10 +188,13 @@ const config: ForgeConfig = {
           target: 'main',
         },
       ],
+      // Headless: the only browser page is the hidden offscreen thumbnail
+      // renderer. The entry name stays `main_window` so Forge keeps injecting
+      // the MAIN_WINDOW_* dev-server globals Main reads for its dev page URL.
       renderer: [
         {
           name: 'main_window',
-          config: 'vite.renderer.config.ts',
+          config: 'vite.offscreen-page.config.ts',
         },
       ],
     }),

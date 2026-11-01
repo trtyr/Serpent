@@ -3082,7 +3082,7 @@ export const workerRequestSchema = z.strictObject({
   performance: performanceRequestEnvelopeSchema.optional(),
   /** Origin metadata is non-secret and only affects the history projection. */
   historyContext: z.strictObject({
-    source: z.enum(['desktop', 'script', 'mcp', 'plugin']),
+    source: z.enum(['desktop', 'script', 'mcp', 'plugin', 'http']),
     sourceReference: identifierSchema.nullable().optional(),
     /** Worker-issued history group used by one automation execution. */
     historyGroupId: identifierSchema.optional(),

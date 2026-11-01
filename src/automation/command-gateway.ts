@@ -114,7 +114,7 @@ export interface AutomationWorkerClient {
       signal?: AbortSignal;
       readonly?: boolean;
       historyContext?: {
-        source: 'desktop' | 'script' | 'mcp' | 'plugin';
+        source: 'desktop' | 'script' | 'mcp' | 'plugin' | 'http';
         sourceReference?: string | null;
         historyGroupId?: string;
       };
@@ -341,7 +341,7 @@ export interface AutomationCommandGatewayOptions {
   filePlanApprovalHandler?: AutomationFilePlanApprovalHandler;
   libraryBindingHandler?: AutomationLibraryBindingHandler;
   libraryContextHandler?: AutomationLibraryContextHandler;
-  mcpInputNormalizer?: (input: {
+  apiInputNormalizer?: (input: {
     commandId: AutomationCommandId;
     executionId: string;
     context: AutomationExecutionContext;
@@ -443,7 +443,7 @@ export function createAutomationCommandGateway(
     filePlanApprovalHandler,
     libraryBindingHandler,
     libraryContextHandler,
-    mcpInputNormalizer,
+    apiInputNormalizer,
     contextBarrier,
     executionStatusHandler,
     uiNotifyHandler,
@@ -775,9 +775,9 @@ export function createAutomationCommandGateway(
       }
 
       let normalizedInput = input;
-      if (context.source === 'mcp' && mcpInputNormalizer !== undefined) {
+      if (context.source === 'mcp' && apiInputNormalizer !== undefined) {
         try {
-          normalizedInput = await mcpInputNormalizer({
+          normalizedInput = await apiInputNormalizer({
             commandId: descriptor.commandId,
             executionId,
             context,
@@ -785,7 +785,7 @@ export function createAutomationCommandGateway(
             signal: context.abortSignal,
           });
         } catch (error) {
-          auditLogger?.error('automation.mcp-input-normalize-failed', error, {
+          auditLogger?.error('automation.api-input-normalize-failed', error, {
             executionId,
             commandId,
           });
@@ -1206,7 +1206,9 @@ export function createAutomationCommandGateway(
             historyContext: {
               source: context.source === 'desktop-console' || context.source === 'test'
                 ? 'desktop'
-                : context.source,
+                : context.source === 'http'
+                  ? 'script'
+                  : context.source,
               sourceReference: executionId,
               ...(historyGroup === undefined ? {} : { historyGroupId: historyGroup.historyEntryId }),
             },

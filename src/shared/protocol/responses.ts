@@ -146,7 +146,7 @@ export type RendererLibrarySummary = z.infer<typeof rendererLibrarySummarySchema
 
 export const historyEntrySummarySchema = z.strictObject({
   historyEntryId: nonBlankString,
-  source: z.enum(['desktop', 'script', 'mcp', 'plugin']),
+  source: z.enum(['desktop', 'script', 'mcp', 'plugin', 'http']),
   sourceReference: nonBlankString.nullable(),
   labelKey: nonBlankString,
   labelArgs: z.record(z.string(), z.union([z.string(), z.number()])),

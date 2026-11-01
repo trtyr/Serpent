@@ -105,9 +105,11 @@ function pageFromWorkerPage<Item>(
 export const automationSourceSchema = z.enum([
   'desktop-console',
   'script',
+  // Legacy: the removed MCP host persisted this source in execution journals.
   'mcp',
   'test',
   'plugin',
+  'http',
 ]);
 export type AutomationSource = z.infer<typeof automationSourceSchema>;
 
@@ -1647,11 +1649,12 @@ export type AutomationCommandResult<Id extends AutomationCommandId> = z.infer<
   (typeof automationCommandResultSchemas)[Id]
 >;
 
-export interface AutomationMcpMetadata {
+export interface AutomationApiMetadata {
   public: boolean;
+  /** Stable external identifier; also the HTTP route name under /commands. */
   toolName: string;
   outputLimit: number;
-  /** MCP-facing input projection; the internal Automation schema may contain Main-only fields. */
+  /** External input projection; the internal Automation schema may contain Main-only fields. */
   inputSchema?: z.ZodType;
 }
 
@@ -1679,9 +1682,9 @@ export interface AutomationCommandDescriptor<Id extends AutomationCommandId = Au
   history?: AutomationHistoryDescriptor;
   atomicity: AutomationAtomicity;
   approvalPolicy: AutomationApprovalPolicy;
-  /** Serpent-8b5b.2: the command is dangerous — MCP calls require the two-phase agent challenge. */
+  /** Serpent-8b5b.2: the command is dangerous and guarded by the two-phase agent challenge. */
   criticalOperation?: boolean;
-  mcp: AutomationMcpMetadata;
+  api: AutomationApiMetadata;
   libraryContext?: AutomationLibraryContext;
   hostCapabilities?: readonly ('desktop-ui')[];
   toWorkerCommand(
@@ -1716,9 +1719,9 @@ function readDescriptor<Id extends AutomationCommandId>(
   };
 }
 
-const allReadSources = ['desktop-console', 'script', 'mcp', 'test', 'plugin'] as const;
-const allInteractiveSources = ['desktop-console', 'script', 'mcp', 'test', 'plugin'] as const;
-const lifecycleSources = ['desktop-console', 'script', 'mcp', 'test'] as const;
+const allReadSources = ['desktop-console', 'script', 'http', 'test', 'plugin'] as const;
+const allInteractiveSources = ['desktop-console', 'script', 'http', 'test', 'plugin'] as const;
+const lifecycleSources = ['desktop-console', 'script', 'http', 'test'] as const;
 
 export const automationCommandRegistry = [
   {
@@ -1730,7 +1733,7 @@ export const automationCommandRegistry = [
     resultSchema: automationCommandResultSchemas['library.create'],
     workerResultSchema: libraryCreateWorkerResultSchema,
     requiredCapabilities: ['library.create'],
-    allowedSources: ['desktop-console', 'script', 'mcp', 'test'],
+    allowedSources: ['desktop-console', 'script', 'http', 'test'],
     impact: 'file-write',
     targetScope: 'library',
     supportsBatch: false,
@@ -1741,7 +1744,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: {
+    api: {
       public: false,
       toolName: 'serpent_library_create',
       outputLimit: 1,
@@ -1785,7 +1788,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-metadata-batch-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_asset_metadata_set_many', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_asset_metadata_set_many', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.metadata.set-many'>) => ({
       type: 'asset.metadata.set-many',
       libraryId,
@@ -1814,7 +1817,7 @@ export const automationCommandRegistry = [
     allowedSources: lifecycleSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_list_open', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_library_list_open', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('library.list-open is resolved by Desktop Main.');
@@ -1831,7 +1834,7 @@ export const automationCommandRegistry = [
     allowedSources: lifecycleSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_open', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_library_open', outputLimit: 1 },
     libraryContext: 'transition',
     toWorkerCommand: () => {
       throw new Error('library.open is resolved by Desktop Main.');
@@ -1848,7 +1851,7 @@ export const automationCommandRegistry = [
     allowedSources: lifecycleSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_show_in_desktop', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_library_show_in_desktop', outputLimit: 1 },
     libraryContext: 'transition',
     toWorkerCommand: () => {
       throw new Error('library.show-in-desktop is resolved by Desktop Main.');
@@ -1862,7 +1865,7 @@ export const automationCommandRegistry = [
     resultSchema: automationCommandResultSchemas['library.list-recent'],
     workerResultSchema: z.never(),
     requiredCapabilities: [], allowedSources: lifecycleSources, targetScope: 'library', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_list_recent', outputLimit: 64 }, libraryContext: 'none',
+    api: { public: true, toolName: 'serpent_library_list_recent', outputLimit: 64 }, libraryContext: 'none',
     toWorkerCommand: () => { throw new Error('library.list-recent is resolved by Desktop Main.'); }, projectResult: () => undefined,
   }),
   {
@@ -1872,7 +1875,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['library.close'], resultSchema: automationCommandResultSchemas['library.close'], workerResultSchema: libraryClosedWorkerResultSchema,
     requiredCapabilities: ['library.read'], allowedSources: lifecycleSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false,
-    atomicity: 'single-transaction', approvalPolicy: 'execution', mcp: { public: true, toolName: 'serpent_library_close', outputLimit: 1 },
+    atomicity: 'single-transaction', approvalPolicy: 'execution', api: { public: true, toolName: 'serpent_library_close', outputLimit: 1 },
     toWorkerCommand: (libraryId) => ({ type: 'library.close', libraryId }),
     projectResult: (result) => { const parsed = libraryClosedWorkerResultSchema.safeParse(result); return parsed.success ? { libraryId: parsed.data.libraryId, closed: true as const } : undefined; },
   },
@@ -1881,7 +1884,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['library.rename'], resultSchema: automationCommandResultSchemas['library.rename'], workerResultSchema: libraryRenamedWorkerResultSchema,
     requiredCapabilities: ['library.read'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false,
-    atomicity: 'single-transaction', approvalPolicy: 'execution', mcp: { public: true, toolName: 'serpent_library_rename', outputLimit: 1 },
+    atomicity: 'single-transaction', approvalPolicy: 'execution', api: { public: true, toolName: 'serpent_library_rename', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'library.rename'>) => ({ type: 'library.rename', libraryId, displayName: input.displayName }),
     projectResult: (result) => { const parsed = libraryRenamedWorkerResultSchema.safeParse(result); return parsed.success ? { libraryId: parsed.data.library.libraryId, displayName: parsed.data.library.displayName } : undefined; },
   },
@@ -1889,10 +1892,10 @@ export const automationCommandRegistry = [
     commandId: 'library.delete-from-disk', apiVersion: AUTOMATION_API_VERSION,
     summary: '从磁盘永久删除当前资源库及其托管内容；链接源目录不受影响。', deprecated: false,
     inputSchema: automationCommandInputSchemas['library.delete-from-disk'], resultSchema: automationCommandResultSchemas['library.delete-from-disk'], workerResultSchema: libraryDeletedWorkerResultSchema,
-    requiredCapabilities: [], allowedSources: ['mcp'], impact: 'destructive', targetScope: 'library', supportsBatch: false,
+    requiredCapabilities: [], allowedSources: ['http'], impact: 'destructive', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false,
     history: { policy: 'barrier' },
-    atomicity: 'best-effort', approvalPolicy: 'none', criticalOperation: true, mcp: { public: true, toolName: 'serpent_library_delete_from_disk', outputLimit: 1 },
+    atomicity: 'best-effort', approvalPolicy: 'none', criticalOperation: true, api: { public: true, toolName: 'serpent_library_delete_from_disk', outputLimit: 1 },
     toWorkerCommand: (libraryId) => ({ type: 'library.delete-from-disk', libraryId }),
     projectResult: (result) => { const parsed = libraryDeletedWorkerResultSchema.safeParse(result); return parsed.success ? { libraryId: parsed.data.libraryId, deleted: true as const } : undefined; },
   },
@@ -1901,7 +1904,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['library.export'], resultSchema: automationCommandResultSchemas['library.export'], workerResultSchema: libraryExportedWorkerResultSchema,
     requiredCapabilities: ['library.read'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: true, supportsDetach: true, supportsUndo: false,
-    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', mcp: { public: true, toolName: 'serpent_library_export', outputLimit: 1 },
+    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', api: { public: true, toolName: 'serpent_library_export', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'library.export'>) => ({ type: 'library.export', libraryId, destinationPath: input.destinationPath, format: input.format, includeLinkedContent: input.includeLinkedContent }),
     projectResult: (result) => { const parsed = libraryExportedWorkerResultSchema.safeParse(result); return parsed.success ? { exportId: parsed.data.exportId, libraryId: parsed.data.libraryId, format: parsed.data.format, fileCount: parsed.data.fileCount, totalBytes: parsed.data.totalBytes, excludedPreviewCount: parsed.data.excludedPreviewCount, includedLinkedContent: parsed.data.includedLinkedContent, durationMs: parsed.data.durationMs } : undefined; },
   },
@@ -1910,7 +1913,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['library.import-folder'], resultSchema: automationCommandResultSchemas['library.import-folder'], workerResultSchema: libraryImportedWorkerResultSchema,
     requiredCapabilities: ['library.create'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', libraryContext: 'none', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false,
-    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', mcp: { public: true, toolName: 'serpent_library_import_folder', outputLimit: 1 },
+    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', api: { public: true, toolName: 'serpent_library_import_folder', outputLimit: 1 },
     toWorkerCommand: (_libraryId, input: AutomationCommandInput<'library.import-folder'>) => ({ type: 'library.import-folder', sourceFolderPath: input.sourceFolderPath, ...(input.copyToParentPath === undefined ? {} : { copyToParentPath: input.copyToParentPath }) }),
     projectResult: (result) => { const parsed = libraryImportedWorkerResultSchema.safeParse(result); return parsed.success ? { importId: parsed.data.importId, libraryId: parsed.data.libraryId, displayName: parsed.data.displayName } : undefined; },
   },
@@ -1919,7 +1922,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['library.import-zip'], resultSchema: automationCommandResultSchemas['library.import-zip'], workerResultSchema: libraryImportedWorkerResultSchema,
     requiredCapabilities: ['library.create'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', libraryContext: 'none', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false,
-    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', mcp: { public: true, toolName: 'serpent_library_import_zip', outputLimit: 1 },
+    atomicity: 'recoverable-file-operation', approvalPolicy: 'execution', api: { public: true, toolName: 'serpent_library_import_zip', outputLimit: 1 },
     toWorkerCommand: (_libraryId, input: AutomationCommandInput<'library.import-zip'>) => ({ type: 'library.import-zip', sourceZipPath: input.sourceZipPath, destinationParentPath: input.destinationParentPath }),
     projectResult: (result) => { const parsed = libraryImportedWorkerResultSchema.safeParse(result); return parsed.success ? { importId: parsed.data.importId, libraryId: parsed.data.libraryId, displayName: parsed.data.displayName } : undefined; },
   },
@@ -1932,7 +1935,7 @@ export const automationCommandRegistry = [
     resultSchema: automationCommandResultSchemas['file.import'],
     workerResultSchema: fileImportWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'file.import'],
-    allowedSources: ['desktop-console', 'script', 'mcp', 'test'],
+    allowedSources: ['desktop-console', 'script', 'http', 'test'],
     impact: 'file-write',
     targetScope: 'library',
     supportsBatch: true,
@@ -1946,7 +1949,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: {
+    api: {
       public: false,
       toolName: 'serpent_file_import',
       outputLimit: AUTOMATION_MAX_PAGE_SIZE,
@@ -1987,7 +1990,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_inspect', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_library_inspect', outputLimit: 1 },
     libraryContext: 'active',
     toWorkerCommand: () => ({ type: 'library.list' }),
     projectResult: (result, libraryId) => {
@@ -2009,7 +2012,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_library_change_sequence', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_library_change_sequence', outputLimit: 1 },
     libraryContext: 'active',
     toWorkerCommand: (libraryId) => ({ type: 'library.change-sequence', libraryId }),
     projectResult: (result) => {
@@ -2027,7 +2030,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_execution_status', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_execution_status', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('execution.status is resolved by Main and does not dispatch to the Worker.');
@@ -2044,7 +2047,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_history_status', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_history_status', outputLimit: 1 },
     libraryContext: 'active',
     toWorkerCommand: (libraryId) => ({ type: 'history.status', libraryId }),
     projectResult: (result) => {
@@ -2073,7 +2076,7 @@ export const automationCommandRegistry = [
     history: { policy: 'none' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_history_undo', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_history_undo', outputLimit: 1 },
     libraryContext: 'active',
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'history.undo'>) => ({
       type: 'history.undo', libraryId, expectedHistoryEntryId: input.expectedHistoryEntryId,
@@ -2106,7 +2109,7 @@ export const automationCommandRegistry = [
     history: { policy: 'none' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_history_redo', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_history_redo', outputLimit: 1 },
     libraryContext: 'active',
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'history.redo'>) => ({
       type: 'history.redo', libraryId, expectedHistoryEntryId: input.expectedHistoryEntryId,
@@ -2131,7 +2134,7 @@ export const automationCommandRegistry = [
     allowedSources: allInteractiveSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_ui_notify', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_ui_notify', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('ui.notify is resolved by Main and does not dispatch to the Worker.');
@@ -2148,7 +2151,7 @@ export const automationCommandRegistry = [
     allowedSources: allInteractiveSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_ui_dialog', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_ui_dialog', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('ui.dialog is resolved by Main and does not dispatch to the Worker.');
@@ -2165,7 +2168,7 @@ export const automationCommandRegistry = [
     allowedSources: ['plugin'] as const,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_ui_widget_patch', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_ui_widget_patch', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('ui.widget-patch is resolved by Main and does not dispatch to the Worker.');
@@ -2182,7 +2185,7 @@ export const automationCommandRegistry = [
     allowedSources: allInteractiveSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_media_binaries_get', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_media_binaries_get', outputLimit: 1 },
     libraryContext: 'none',
     toWorkerCommand: () => {
       throw new Error('media.binaries.get is resolved by Main and does not dispatch to the Worker.');
@@ -2213,7 +2216,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-metadata-batch-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_asset_rating_set', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_asset_rating_set', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.rating.set'>) => ({
       type: 'asset.rating.set',
       libraryId,
@@ -2247,7 +2250,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'best-effort',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_asset_paths_copy', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_paths_copy', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.paths.copy'>) => ({
       type: 'media.get-asset-paths', libraryId, assetIds: input.assetIds,
     }),
@@ -2277,7 +2280,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-trash', group: 'single-command' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_trash', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_trash', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.trash'>, plan) => ({
       type: 'asset.trash',
       libraryId,
@@ -2304,7 +2307,7 @@ export const automationCommandRegistry = [
     resultSchema: automationCommandResultSchemas['asset.delete-permanent'],
     workerResultSchema: assetDeletePermanentWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'trash.write'],
-    allowedSources: ['mcp'],
+    allowedSources: ['http'],
     impact: 'destructive',
     targetScope: 'asset-set',
     supportsBatch: true,
@@ -2317,7 +2320,7 @@ export const automationCommandRegistry = [
     atomicity: 'best-effort',
     approvalPolicy: 'none',
     criticalOperation: true,
-    mcp: { public: false, toolName: 'serpent_asset_delete_permanent', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_delete_permanent', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.delete-permanent'>) => ({
       type: 'asset.delete-permanent',
       libraryId,
@@ -2354,7 +2357,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_content_replace', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_content_replace', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.content.replace'>, plan) => ({
       type: 'asset.content.replace',
       libraryId,
@@ -2394,7 +2397,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'best-effort',
     approvalPolicy: 'none',
-    mcp: { public: false, toolName: 'serpent_asset_content_stage', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_content_stage', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.content.stage'>) => ({
       type: 'asset.content.stage',
       libraryId,
@@ -2435,7 +2438,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_content_replace_batch', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_content_replace_batch', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.content.replace-batch'>, plan) => ({
       type: 'asset.content.replace-batch',
       libraryId,
@@ -2459,7 +2462,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'asset',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_asset_content_read', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_content_read', outputLimit: 1 },
     toWorkerCommand: (libraryId, input) => ({
       type: 'asset.content.read',
       libraryId,
@@ -2501,7 +2504,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'managed-asset-move', group: 'single-command' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_move', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_move', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.move'>, plan) => ({
       type: 'asset.move',
       libraryId,
@@ -2542,7 +2545,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-rename', group: 'single-command' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_rename_file', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_rename_file', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.rename-file'>, plan) => ({
       type: 'asset.rename-file',
       libraryId,
@@ -2580,7 +2583,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-rename', group: 'single-command' },
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_rename_files', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_asset_rename_files', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.rename-files'>, plan) => ({
       type: 'asset.rename-files', libraryId, items: input.items,
       ...(plan === undefined ? {} : { automationPlan: plan }),
@@ -2602,7 +2605,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_asset_list_trash', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_asset_list_trash', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'asset.list-trash', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = assetListTrashWorkerResultSchema.safeParse(result);
@@ -2631,7 +2634,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'recoverable-file-operation',
     approvalPolicy: 'plan',
-    mcp: { public: false, toolName: 'serpent_asset_restore_if_original_vacant', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_asset_restore_if_original_vacant', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.restore-if-original-vacant'>, plan) => ({
       type: 'asset.restore-if-original-vacant', libraryId, assetIds: input.assetIds,
       ...(plan === undefined ? {} : { automationPlan: plan }),
@@ -2657,7 +2660,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: false, toolName: 'serpent_asset_palette_aggregate_recent', outputLimit: 24 },
+    api: { public: false, toolName: 'serpent_asset_palette_aggregate_recent', outputLimit: 24 },
     toWorkerCommand: (libraryId, input) => ({
       type: 'asset.palette.aggregate-recent', libraryId, days: input.days, limit: input.limit,
     }),
@@ -2683,7 +2686,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_folder_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_folder_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'folder.list', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = folderListWorkerResultSchema.safeParse(result);
@@ -2711,7 +2714,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'managed-folder-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_folder_create', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_folder_create', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'folder.create'>) => ({
       type: 'folder.create',
       libraryId,
@@ -2736,7 +2739,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['folder.rename'], resultSchema: automationCommandResultSchemas['folder.rename'], workerResultSchema: folderRenamedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'managed-folder-rename', group: 'single-command' }, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_folder_rename', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_folder_rename', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'folder.rename'>) => ({ type: 'folder.rename', libraryId, folderId: input.folderId, newName: input.newName }),
     projectResult: (result) => { const parsed = folderRenamedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.folder : undefined; },
   },
@@ -2745,7 +2748,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['folder.move'], resultSchema: automationCommandResultSchemas['folder.move'], workerResultSchema: folderMovedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'managed-folder-move', group: 'single-command' }, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_folder_move', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_folder_move', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'folder.move'>) => ({ type: 'folder.move', libraryId, folderIds: input.folderIds, targetParentFolderId: input.targetParentFolderId, conflictStrategy: input.conflictStrategy }),
     projectResult: (result) => { const parsed = folderMovedWorkerResultSchema.safeParse(result); return parsed.success ? { movedCount: parsed.data.movedCount, skippedCount: parsed.data.skippedCount, folders: parsed.data.folders } : undefined; },
   },
@@ -2754,7 +2757,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['folder.delete-empty'], resultSchema: automationCommandResultSchemas['folder.delete-empty'], workerResultSchema: folderEmptyDeletedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'managed-folder-snapshot', group: 'single-command' }, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_folder_delete_empty', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_folder_delete_empty', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'folder.delete-empty'>) => ({ type: 'folder.delete-empty', libraryId, folderIds: input.folderIds }),
     projectResult: (result) => { const parsed = folderEmptyDeletedWorkerResultSchema.safeParse(result); return parsed.success ? { deletedFolderIds: parsed.data.deletedFolderIds } : undefined; },
   },
@@ -2768,7 +2771,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_linked_folder_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_linked_folder_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'linked-folder.list', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = linkedFolderListWorkerResultSchema.safeParse(result);
@@ -2780,7 +2783,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['linked-folder.create'], resultSchema: automationCommandResultSchemas['linked-folder.create'], workerResultSchema: linkedFolderCreatedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_linked_folder_create', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_linked_folder_create', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'linked-folder.create'>) => ({ type: 'asset.import-linked', libraryId, sourceRootPath: input.sourceRootPath, ...(input.displayName === undefined ? {} : { displayName: input.displayName }) }),
     projectResult: (result) => { const parsed = linkedFolderCreatedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.linkedFolder : undefined; },
   },
@@ -2789,7 +2792,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['linked-folder.relink'], resultSchema: automationCommandResultSchemas['linked-folder.relink'], workerResultSchema: linkedFolderRelinkedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_linked_folder_relink', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_linked_folder_relink', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'linked-folder.relink'>) => ({ type: 'linked-folder.relink', libraryId, folderId: input.folderId, newRootPath: input.newRootPath }),
     projectResult: (result) => { const parsed = linkedFolderRelinkedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.linkedFolder : undefined; },
   },
@@ -2798,14 +2801,14 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['linked-folder.remove'], resultSchema: automationCommandResultSchemas['linked-folder.remove'], workerResultSchema: linkedFolderRemovedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_linked_folder_remove', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_linked_folder_remove', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'linked-folder.remove'>) => ({ type: 'linked-folder.remove', libraryId, folderId: input.folderId }),
     projectResult: (result) => { const parsed = linkedFolderRemovedWorkerResultSchema.safeParse(result); return parsed.success ? { folderId: parsed.data.folderId, removedAssetCount: parsed.data.removedAssetCount } : undefined; },
   },
   readDescriptor({
     commandId: 'linked-folder.rules.get', summary: '读取链接文件夹过滤规则。', inputSchema: automationCommandInputSchemas['linked-folder.rules.get'], resultSchema: automationCommandResultSchemas['linked-folder.rules.get'], workerResultSchema: linkedFolderRulesWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.read'], allowedSources: allReadSources, targetScope: 'library', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_linked_folder_rules_get', outputLimit: 200 },
+    api: { public: true, toolName: 'serpent_linked_folder_rules_get', outputLimit: 200 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'linked-folder.rules.get'>) => ({ type: 'linked-folder.rules.get', libraryId, folderId: input.folderId }),
     projectResult: (result) => { const parsed = linkedFolderRulesWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.rules : undefined; },
   }),
@@ -2814,7 +2817,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['linked-folder.rules.set'], resultSchema: automationCommandResultSchemas['linked-folder.rules.set'], workerResultSchema: linkedFolderRulesUpdatedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_linked_folder_rules_set', outputLimit: 200 },
+    api: { public: true, toolName: 'serpent_linked_folder_rules_set', outputLimit: 200 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'linked-folder.rules.set'>) => ({ type: 'linked-folder.rules.set', libraryId, folderId: input.folderId, rules: input.rules }),
     projectResult: (result) => { const parsed = linkedFolderRulesUpdatedWorkerResultSchema.safeParse(result); return parsed.success ? { rules: parsed.data.rules, hiddenCount: parsed.data.hiddenCount, restoredCount: parsed.data.restoredCount } : undefined; },
   },
@@ -2823,7 +2826,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['linked-folder.refresh'], resultSchema: automationCommandResultSchemas['linked-folder.refresh'], workerResultSchema: assetRefreshedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, atomicity: 'best-effort', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_linked_folder_refresh', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_linked_folder_refresh', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'asset.refresh', libraryId }),
     projectResult: (result) => { const parsed = assetRefreshedWorkerResultSchema.safeParse(result); return parsed.success ? { changedCount: parsed.data.changedCount, missingCount: parsed.data.missingCount, assets: parsed.data.assets } : undefined; },
   },
@@ -2837,7 +2840,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: true,
-    mcp: { public: true, toolName: 'serpent_asset_list', outputLimit: 200 },
+    api: { public: true, toolName: 'serpent_asset_list', outputLimit: 200 },
     toWorkerCommand: (libraryId, input) => ({
       type: 'asset.list',
       libraryId,
@@ -2857,14 +2860,14 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['asset.copy'], resultSchema: automationCommandResultSchemas['asset.copy'], workerResultSchema: assetCopyWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'folder.write'], allowedSources: allInteractiveSources, impact: 'file-write', targetScope: 'asset-set', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'managed-asset-copy', group: 'single-command' }, atomicity: 'recoverable-file-operation', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_asset_copy', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_asset_copy', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.copy'>) => ({ type: 'asset.copy', libraryId, assetIds: input.assetIds, targetFolderId: input.targetFolderId, ...(input.conflictStrategy === undefined ? {} : { conflictStrategy: input.conflictStrategy }) }),
     projectResult: (result) => { const parsed = assetCopyWorkerResultSchema.safeParse(result); return parsed.success ? { copiedCount: parsed.data.copiedCount, skippedCount: parsed.data.skippedCount, operationId: parsed.data.operationId, assets: parsed.data.assets } : undefined; },
   },
   readDescriptor({
     commandId: 'asset.thumbnail.get', summary: '读取资产缩略图派生物信息。', inputSchema: automationCommandInputSchemas['asset.thumbnail.get'], resultSchema: automationCommandResultSchemas['asset.thumbnail.get'], workerResultSchema: mediaThumbnailArtifactWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'content.read'], allowedSources: allReadSources, targetScope: 'asset', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_asset_thumbnail_get', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_asset_thumbnail_get', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.thumbnail.get'>) => ({ type: 'media.get-thumbnail-artifact', libraryId, assetId: input.assetId }),
     projectResult: (result) => { const parsed = mediaThumbnailArtifactWorkerResultSchema.safeParse(result); return parsed.success ? { artifactId: parsed.data.artifactId, width: parsed.data.width, height: parsed.data.height } : undefined; },
   }),
@@ -2873,7 +2876,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['asset.preview.get'], resultSchema: automationCommandResultSchemas['asset.preview.get'], workerResultSchema: mediaPreviewArtifactWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'content.read'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'asset', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, atomicity: 'best-effort', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_asset_preview_get', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_asset_preview_get', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.preview.get'>) => ({ type: 'media.get-preview-artifact', libraryId, assetId: input.assetId, ...(input.intent === undefined ? {} : { intent: input.intent }), ...(input.exrPlane === undefined ? {} : { exrPlane: input.exrPlane }), ...(input.colorSpace === undefined ? {} : { colorSpace: input.colorSpace }) }),
     projectResult: (result) => { const parsed = mediaPreviewArtifactWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data : undefined; },
   },
@@ -2882,7 +2885,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['asset.refresh'], resultSchema: automationCommandResultSchemas['asset.refresh'], workerResultSchema: assetRefreshedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: true, supportsUndo: false, atomicity: 'best-effort', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_asset_refresh', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_asset_refresh', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'asset.refresh', libraryId }),
     projectResult: (result) => { const parsed = assetRefreshedWorkerResultSchema.safeParse(result); return parsed.success ? { changedCount: parsed.data.changedCount, missingCount: parsed.data.missingCount, assets: parsed.data.assets } : undefined; },
   },
@@ -2896,7 +2899,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'asset',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_asset_metadata_get', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_asset_metadata_get', outputLimit: 1 },
     toWorkerCommand: (libraryId, input) => ({ type: 'asset.metadata.get', libraryId, assetId: input.assetId }),
     projectResult: (result) => assetMetadataWorkerResultSchema.safeParse(result).data,
   }),
@@ -2910,7 +2913,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'asset',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_asset_ai_content_get', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_asset_ai_content_get', outputLimit: 1 },
     toWorkerCommand: (libraryId, input) => ({ type: 'ai.content.get', libraryId, assetId: input.assetId }),
     projectResult: (result) => assetAiContentWorkerResultSchema.safeParse(result).data,
   }),
@@ -2935,7 +2938,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'asset-metadata-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_asset_metadata_set', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_asset_metadata_set', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'asset.metadata.set'>) => ({
       type: 'asset.metadata.set',
       libraryId,
@@ -2968,7 +2971,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'asset',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_asset_extracted_metadata_get', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_asset_extracted_metadata_get', outputLimit: 1 },
     toWorkerCommand: (libraryId, input) => ({ type: 'asset.extracted-metadata.get', libraryId, assetId: input.assetId }),
     projectResult: (result) => assetExtractedMetadataWorkerResultSchema.safeParse(result).data,
   }),
@@ -2982,7 +2985,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: true,
-    mcp: { public: true, toolName: 'serpent_asset_search', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_asset_search', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input) => ({
       type: 'asset.search',
       libraryId,
@@ -3021,7 +3024,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_tag_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_tag_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'tag.list', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = tagListWorkerResultSchema.safeParse(result);
@@ -3049,7 +3052,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'tag-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_tag_create', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_tag_create', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.create'>) => ({
       type: 'tag.create',
       libraryId,
@@ -3071,7 +3074,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['tag.rename'], resultSchema: automationCommandResultSchemas['tag.rename'], workerResultSchema: tagRenamedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'tag.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'tag-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_tag_rename', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_tag_rename', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.rename'>) => ({ type: 'tag.rename', libraryId, tagId: input.tagId, name: input.name }),
     projectResult: (result) => { const parsed = tagRenamedWorkerResultSchema.safeParse(result); return parsed.success ? { id: parsed.data.tag.tagId, name: parsed.data.tag.name, assetCount: parsed.data.tag.assetCount } : undefined; },
   },
@@ -3080,7 +3083,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['tag.delete'], resultSchema: automationCommandResultSchemas['tag.delete'], workerResultSchema: tagDeletedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'tag.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'tag-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_tag_delete', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_tag_delete', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.delete'>) => ({ type: 'tag.delete', libraryId, tagId: input.tagId }),
     projectResult: (result) => { const parsed = tagDeletedWorkerResultSchema.safeParse(result); return parsed.success ? { tagId: parsed.data.tagId } : undefined; },
   },
@@ -3089,7 +3092,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['tag.delete-many'], resultSchema: automationCommandResultSchemas['tag.delete-many'], workerResultSchema: tagDeletedManyWorkerResultSchema,
     requiredCapabilities: ['library.read', 'tag.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'tag-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_tag_delete_many', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_tag_delete_many', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.delete-many'>) => ({ type: 'tag.delete-many', libraryId, tagIds: input.tagIds }),
     projectResult: (result) => { const parsed = tagDeletedManyWorkerResultSchema.safeParse(result); return parsed.success ? { deletedTagIds: parsed.data.deletedTagIds } : undefined; },
   },
@@ -3098,14 +3101,14 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['tag.merge'], resultSchema: automationCommandResultSchemas['tag.merge'], workerResultSchema: tagMergedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'tag.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'tag-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_tag_merge', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_tag_merge', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.merge'>) => ({ type: 'tag.merge', libraryId, sourceTagIds: input.sourceTagIds, name: input.name }),
     projectResult: (result) => { const parsed = tagMergedWorkerResultSchema.safeParse(result); return parsed.success ? { id: parsed.data.tag.tagId, name: parsed.data.tag.name, assetCount: parsed.data.tag.assetCount, mergedTagIds: parsed.data.mergedTagIds } : undefined; },
   },
   readDescriptor({
     commandId: 'tag.cooccurrence', summary: '读取标签共现关系图，用于发现孤立或重复标签。', inputSchema: automationCommandInputSchemas['tag.cooccurrence'], resultSchema: automationCommandResultSchemas['tag.cooccurrence'], workerResultSchema: tagCooccurrenceWorkerResultSchema,
     requiredCapabilities: ['library.read', 'tag.read'], allowedSources: allReadSources, targetScope: 'library', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_tag_cooccurrence', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_tag_cooccurrence', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.cooccurrence'>) => ({ type: 'tag.cooccurrence', libraryId, ...(input.minWeight === undefined ? {} : { minWeight: input.minWeight }), ...(input.maxNodes === undefined ? {} : { maxNodes: input.maxNodes }), ...(input.maxEdges === undefined ? {} : { maxEdges: input.maxEdges }) }),
     projectResult: (result) => { const parsed = tagCooccurrenceWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.graph : undefined; },
   }),
@@ -3130,7 +3133,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'tag-relations-add', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_tag_assign', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_tag_assign', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.assign'>) => ({
       type: 'tag.assign',
       libraryId,
@@ -3165,7 +3168,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'tag-relations-remove', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_tag_remove', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_tag_remove', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'tag.remove'>) => ({
       type: 'tag.remove',
       libraryId,
@@ -3189,7 +3192,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_collection_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_collection_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'collection.list', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = collectionListWorkerResultSchema.safeParse(result);
@@ -3217,7 +3220,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'collection-snapshot', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_collection_create', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_collection_create', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.create'>) => ({
       type: 'collection.create',
       libraryId,
@@ -3243,7 +3246,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['collection.update'], resultSchema: automationCommandResultSchemas['collection.update'], workerResultSchema: collectionUpdatedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_collection_update', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_collection_update', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.update'>) => ({ type: 'collection.update', libraryId, collectionId: input.collectionId, ...(input.name === undefined ? {} : { name: input.name }), ...(input.parentId === undefined ? {} : { parentId: input.parentId }), ...(input.description === undefined ? {} : { description: input.description }), ...(input.coverAssetId === undefined ? {} : { coverAssetId: input.coverAssetId }), ...(input.position === undefined ? {} : { position: input.position }) }),
     projectResult: (result) => { const parsed = collectionUpdatedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.collection : undefined; },
   },
@@ -3252,7 +3255,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['collection.reorder'], resultSchema: automationCommandResultSchemas['collection.reorder'], workerResultSchema: collectionReorderedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_collection_reorder', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_collection_reorder', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.reorder'>) => ({ type: 'collection.reorder', libraryId, orderedCollectionIds: input.orderedCollectionIds }),
     projectResult: (result) => { const parsed = collectionReorderedWorkerResultSchema.safeParse(result); return parsed.success ? { orderedCollectionIds: parsed.data.orderedCollectionIds } : undefined; },
   },
@@ -3261,7 +3264,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['collection.delete'], resultSchema: automationCommandResultSchemas['collection.delete'], workerResultSchema: collectionDeletedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_collection_delete', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_collection_delete', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.delete'>) => ({ type: 'collection.delete', libraryId, collectionId: input.collectionId }),
     projectResult: (result) => { const parsed = collectionDeletedWorkerResultSchema.safeParse(result); return parsed.success ? { collectionId: parsed.data.collectionId } : undefined; },
   },
@@ -3286,7 +3289,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'collection-assets-add', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_collection_assets_add', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_collection_assets_add', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.assets.add'>) => ({
       type: 'collection.assets.add',
       libraryId,
@@ -3319,7 +3322,7 @@ export const automationCommandRegistry = [
     history: { policy: 'reversible', recipeKind: 'collection-assets-remove', group: 'single-command' },
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_collection_assets_remove', outputLimit: 1 },
+    api: { public: false, toolName: 'serpent_collection_assets_remove', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.assets.remove'>) => ({
       type: 'collection.assets.remove',
       libraryId,
@@ -3336,14 +3339,14 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['collection.assets.reorder'], resultSchema: automationCommandResultSchemas['collection.assets.reorder'], workerResultSchema: collectionAssetsReorderedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: true,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_collection_assets_reorder', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_collection_assets_reorder', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.assets.reorder'>) => ({ type: 'collection.assets.reorder', libraryId, collectionId: input.collectionId, orderedAssetIds: input.orderedAssetIds }),
     projectResult: (result) => { const parsed = collectionAssetsReorderedWorkerResultSchema.safeParse(result); return parsed.success ? { collectionId: parsed.data.collectionId } : undefined; },
   },
   readDescriptor({
     commandId: 'collection.assets.list', summary: '列出合集中的资产。', inputSchema: automationCommandInputSchemas['collection.assets.list'], resultSchema: automationCommandResultSchemas['collection.assets.list'], workerResultSchema: collectionAssetsListWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'collection.read'], allowedSources: allReadSources, targetScope: 'library', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_collection_assets_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_collection_assets_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'collection.assets.list'>) => ({ type: 'collection.assets.list', libraryId, collectionId: input.collectionId, recursive: input.recursive }),
     projectResult: (result, _libraryId, input) => { const parsed = collectionAssetsListWorkerResultSchema.safeParse(result); return parsed.success ? pageFromCompleteList(parsed.data.assets.map(automationAssetSummary), input) : undefined; },
   }),
@@ -3357,7 +3360,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'asset-set',
     supportsBatch: true,
-    mcp: { public: true, toolName: 'serpent_collection_asset_memberships', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_collection_asset_memberships', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input) => ({
       type: 'collection.assets.memberships',
       libraryId,
@@ -3378,7 +3381,7 @@ export const automationCommandRegistry = [
     allowedSources: allReadSources,
     targetScope: 'library',
     supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_smart_collection_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_smart_collection_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'smart-collection.list', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = smartCollectionListWorkerResultSchema.safeParse(result);
@@ -3390,7 +3393,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['smart-collection.create'], resultSchema: automationCommandResultSchemas['smart-collection.create'], workerResultSchema: smartCollectionCreatedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'smart-collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_smart_collection_create', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_smart_collection_create', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'smart-collection.create'>) => ({ type: 'smart-collection.create', libraryId, name: input.name, queryDefinitionJson: input.queryDefinitionJson }),
     projectResult: (result) => { const parsed = smartCollectionCreatedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.collection : undefined; },
   },
@@ -3399,7 +3402,7 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['smart-collection.update'], resultSchema: automationCommandResultSchemas['smart-collection.update'], workerResultSchema: smartCollectionUpdatedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'smart-collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_smart_collection_update', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_smart_collection_update', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'smart-collection.update'>) => ({ type: 'smart-collection.update', libraryId, collectionId: input.collectionId, ...(input.name === undefined ? {} : { name: input.name }), ...(input.queryDefinitionJson === undefined ? {} : { queryDefinitionJson: input.queryDefinitionJson }), ...(input.position === undefined ? {} : { position: input.position }) }),
     projectResult: (result) => { const parsed = smartCollectionUpdatedWorkerResultSchema.safeParse(result); return parsed.success ? parsed.data.collection : undefined; },
   },
@@ -3408,14 +3411,14 @@ export const automationCommandRegistry = [
     inputSchema: automationCommandInputSchemas['smart-collection.delete'], resultSchema: automationCommandResultSchemas['smart-collection.delete'], workerResultSchema: smartCollectionDeletedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'collection.write'], allowedSources: allInteractiveSources, impact: 'metadata-write', targetScope: 'library', supportsBatch: false,
     supportsDryRun: false, supportsIdempotencyKey: false, supportsCancellation: false, supportsDetach: false, supportsUndo: false, history: { policy: 'reversible', recipeKind: 'smart-collection-snapshot', group: 'single-command' }, atomicity: 'single-transaction', approvalPolicy: 'execution',
-    mcp: { public: true, toolName: 'serpent_smart_collection_delete', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_smart_collection_delete', outputLimit: 1 },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'smart-collection.delete'>) => ({ type: 'smart-collection.delete', libraryId, collectionId: input.collectionId }),
     projectResult: (result) => { const parsed = smartCollectionDeletedWorkerResultSchema.safeParse(result); return parsed.success ? { collectionId: parsed.data.collectionId } : undefined; },
   },
   readDescriptor({
     commandId: 'smart-collection.execute', summary: '执行智能合集规则并返回匹配资产。', inputSchema: automationCommandInputSchemas['smart-collection.execute'], resultSchema: automationCommandResultSchemas['smart-collection.execute'], workerResultSchema: smartCollectionExecutedWorkerResultSchema,
     requiredCapabilities: ['library.read', 'asset.read', 'collection.read'], allowedSources: allReadSources, targetScope: 'library', supportsBatch: false,
-    mcp: { public: true, toolName: 'serpent_smart_collection_execute', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_smart_collection_execute', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'smart-collection.execute'>) => ({ type: 'smart-collection.execute', libraryId, collectionId: input.collectionId, ...(input.scopeMode === undefined ? {} : { scopeMode: input.scopeMode }), limit: input.limit, offset: input.offset }),
     projectResult: (result, _libraryId, input) => { const parsed = smartCollectionExecutedWorkerResultSchema.safeParse(result); return parsed.success ? { ...pageFromWorkerPage(parsed.data.items.map(automationAssetSummary), parsed.data.total, input) } : undefined; },
   }),
@@ -3430,7 +3433,7 @@ export const automationCommandRegistry = [
     targetScope: 'library',
     supportsBatch: true,
     supportsDetach: true,
-    mcp: { public: true, toolName: 'serpent_media_jobs_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_media_jobs_list', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId) => ({ type: 'media.list-jobs', libraryId }),
     projectResult: (result, _libraryId, input) => {
       const parsed = mediaJobsWorkerResultSchema.safeParse(result);
@@ -3453,11 +3456,11 @@ export const automationCommandRegistry = [
     resultSchema: automationCommandResultSchemas['media.jobs.cancel'],
     workerResultSchema: mediaJobsCancelWorkerResultSchema,
     requiredCapabilities: ['library.read', 'job.read', 'job.manage'],
-    allowedSources: ['mcp'],
+    allowedSources: ['http'],
     targetScope: 'library',
     supportsBatch: true,
     supportsDetach: true,
-    mcp: { public: true, toolName: 'serpent_media_jobs_cancel', outputLimit: 1 },
+    api: { public: true, toolName: 'serpent_media_jobs_cancel', outputLimit: 1 },
     toWorkerCommand: (libraryId, input) => ({
       type: 'media.cancel-jobs',
       libraryId,
@@ -3479,7 +3482,7 @@ export const automationCommandRegistry = [
     targetScope: 'job-set',
     supportsBatch: true,
     supportsDetach: true,
-    mcp: { public: true, toolName: 'serpent_ai_jobs_status', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: true, toolName: 'serpent_ai_jobs_status', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input) => ({ type: 'ai.status', libraryId, jobIds: input.jobIds }),
     projectResult: (result, _libraryId, input) => {
       const parsed = aiJobsWorkerResultSchema.safeParse(result);
@@ -3506,7 +3509,7 @@ export const automationCommandRegistry = [
     supportsUndo: false,
     atomicity: 'single-transaction',
     approvalPolicy: 'execution',
-    mcp: { public: false, toolName: 'serpent_ai_enqueue', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
+    api: { public: false, toolName: 'serpent_ai_enqueue', outputLimit: AUTOMATION_MAX_PAGE_SIZE },
     toWorkerCommand: (libraryId, input: AutomationCommandInput<'ai.enqueue'>) => ({
       type: 'ai.enqueue-analysis',
       libraryId,
@@ -3606,7 +3609,7 @@ export function describeAutomationCommands(): {
     history: AutomationHistoryDescriptor;
     atomicity: AutomationAtomicity;
     approvalPolicy: AutomationApprovalPolicy;
-    mcp: AutomationMcpMetadata;
+    api: AutomationApiMetadata;
   }>;
 } {
   return {
@@ -3631,7 +3634,7 @@ export function describeAutomationCommands(): {
       history: descriptor.history ?? { policy: 'none' },
       atomicity: descriptor.atomicity,
       approvalPolicy: descriptor.approvalPolicy,
-      mcp: descriptor.mcp,
+      api: descriptor.api,
     })),
   };
 }

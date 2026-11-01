@@ -3,7 +3,7 @@
  * Replay the Poly Haven HDRI acquisition for the bundled 3D preview assets.
  *
  * Downloads the two 1K equirectangular `.hdr` environment maps (studio +
- * natural, CC0) that `src/renderer/3d-viewer/hdri-presets.ts` ships with,
+ * natural, CC0) that `src/media-render/3d-viewer/hdri-presets.ts` ships with,
  * verifying exact byte size and SHA-256 against the recorded receipt. Safe
  * to re-run: files are only written after both checks pass.
  *
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..');
-const OUT_DIR = resolve(ROOT, 'src/renderer/assets/hdri');
+const OUT_DIR = resolve(ROOT, 'src/media-render/assets/hdri');
 
 const ASSETS = [
   {
