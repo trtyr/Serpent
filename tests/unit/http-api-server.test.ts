@@ -131,4 +131,21 @@ describe("headless HTTP API server", () => {
     expect(response.status).toBe(404);
     expect(JSON.parse(response.body)).toMatchObject({ ok: false, code: "ASSET_NOT_FOUND" });
   });
+
+  it("passes through the structured challenge for critical operations", async () => {
+    const execute = vi.fn(async () => ({
+      ok: false as const,
+      challenge: { operation: "trash", targetCount: 3 },
+    }));
+    const { port, token } = await startServer({ execute: execute as any });
+    const response = await request(port, "POST", "/commands/serpent_asset_metadata_set_many", token, {
+      libraryId: "lib-1",
+      assetIds: ["a1"],
+    });
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(response.body);
+    expect(payload).toMatchObject({ ok: true, executed: false });
+    expect(payload.challenge).toBeDefined();
+  });
+
 });

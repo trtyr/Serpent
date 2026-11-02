@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -22,7 +24,7 @@ function syncBindingsPath(): string {
 export function readSyncServers(): SyncServerRecord[] {
   try {
     const parsed = JSON.parse(readFileSync(syncServersPath(), "utf-8")) as unknown;
-    if (Array.isArray(parsed)) return parsed as SyncServerRecord[];
+    if (Array.isArray(parsed)) return parsed as SyncServerRecord[]; // TODO: add zod schema validation
   } catch {
     // 首次运行。
   }

@@ -199,7 +199,7 @@ export class WebDAVDriver implements RemoteStorageDriver {
   constructor(config: WebDAVDriverConfig) {
     const baseUrl = new URL(config.baseUrl);
     if (baseUrl.protocol === 'http:' && baseUrl.hostname !== 'localhost' && !config.allowInsecureTls) {
-      // HTTP 明文默认拒绝（规格：仅 HTTPS；用户在连接配置中显式确认后才允许）。
+    throw new Error('Refusing to send credentials over plaintext HTTP. Set allowInsecureTls to override.');
       // 驱动层面仍可构造，由上层 UI 决定是否传递 allowInsecureTls。
     }
     this.config = {

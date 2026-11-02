@@ -12,6 +12,7 @@ const PROBE_INPUTS = ["a red bicycle", "quarterly budget meeting"] as const;
 export const EMBEDDING_HTTP_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 export class EmbeddingHttpRequestError extends Error {
+  override cause?: unknown
   readonly kind: "network" | "auth" | "format";
 
   constructor(kind: EmbeddingHttpRequestError["kind"]) {

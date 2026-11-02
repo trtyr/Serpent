@@ -2334,7 +2334,7 @@ async function handleRequest(request: WorkerRequest): Promise<WorkerResult> {
     try {
       const historyContext = request.historyContext;
       if (historyContext?.sourceReference === undefined || historyContext.sourceReference === null) {
-        throw new LibraryServiceError('LIBRARY_CORRUPT');
+        throw new LibraryServiceError('INTERNAL_ERROR');
       }
       if (request.command.type === 'history.group.begin') {
         const result = libraryService.beginOperationHistoryGroup({

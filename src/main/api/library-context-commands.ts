@@ -2,7 +2,6 @@ import type { AutomationExecutionContext } from "../../automation/command-gatewa
 import type { AutomationCommandId } from "../../automation/command-registry";
 import { AutomationLibraryContextError } from "../automation-execution-journal";
 import { runtime } from "../runtime/app-runtime";
-import { publishLifecycle } from "../events/worker-events";
 import {
   readRecentLibrariesForAutoOpen,
   readRecentLibraryById,
@@ -55,7 +54,7 @@ async function executeApiLibraryContextCommand(input: {
         active: false,
       })),
       activeLibraryId: null,
-      contextRevision: 0,
+      contextRevision: 0, // TODO: wire to automation journal revision for optimistic concurrency
     };
   }
 
@@ -84,7 +83,7 @@ async function executeApiLibraryContextCommand(input: {
   }
   if (input.commandId === 'library.open') {
     if (selected.libraryId === '' || needsOpen) {
-      publishLifecycle({ type: 'library.opening', operation: 'open', source: 'http' });
+      
       const opened = await client.request({
         type: 'library.open',
         selectedLibraryPath: selected.libraryPath,
@@ -98,42 +97,21 @@ async function executeApiLibraryContextCommand(input: {
         libraryId: selected.libraryId,
         libraryDirectory: selected.libraryPath,
       });
-      publishLifecycle({
-        type: 'library.opened',
-        source: 'http',
-        library: {
-          libraryId: selected.libraryId,
-          displayName: selected.displayName,
-          displayPath: selected.libraryPath,
-          ...(selected.readOnly === undefined ? {} : { readOnly: selected.readOnly }),
-          ...(selected.networkStorage === undefined ? {} : { networkStorage: selected.networkStorage }),
-          ...(selected.libraryVersion === undefined ? {} : { libraryVersion: selected.libraryVersion }),
-          ...(selected.supportedSchemaVersion === undefined ? {} : { supportedSchemaVersion: selected.supportedSchemaVersion }),
-          ...(selected.migrationStuck === undefined ? {} : { migrationStuck: selected.migrationStuck }),
-        },
-      });
+      
     }
   }
   if (selected.libraryId === '') {
     throw new AutomationLibraryContextError('AUTOMATION_LIBRARY_OPEN_FAILED');
   }
-  if (input.commandId === 'library.show-in-desktop') {
-    publishLifecycle({
-      type: 'library.opened',
-      source: 'http',
-      library: {
-        libraryId: selected.libraryId,
-        displayName: selected.displayName,
-        displayPath: selected.libraryPath,
-      },
-    });
-  }
+  // library.show-in-desktop is a no-op in headless mode
   return {
     libraryId: selected.libraryId,
     displayName: selected.displayName,
-    contextRevision: 0,
+    contextRevision: 0, // TODO: wire to automation journal revision for optimistic concurrency
   };
 }
+
+
 
 async function normalizeApiCommandInput(input: {
   commandId: AutomationCommandId;
@@ -142,12 +120,6 @@ async function normalizeApiCommandInput(input: {
   commandInput: unknown;
   signal?: AbortSignal;
 }): Promise<unknown | undefined> {
-  // MCP always supplies explicit paths. Opening a native picker here would
-  // make a supposedly stateless/headless request depend on a human and would
-  // recreate the repeated confirmation failure this adapter is designed to
-  // eliminate. The Registry MCP schemas validate these fields before this
-  // normalizer runs.
-  if (input.signal?.aborted) return input.commandInput;
   return input.commandInput;
 }
 

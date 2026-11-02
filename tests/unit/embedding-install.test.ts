@@ -95,31 +95,22 @@ describe("embedding install download sizing", () => {
     })).toBeGreaterThan(600_000_000);
   });
 
-  it("falls back across github mirrors when the first candidate fails", async () => {
+  it("propagates the error when the sole direct URL fails (no mirrors)", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "serpent-embed-dl-"));
     const destination = path.join(root, "llama.tar.gz");
     let attempts = 0;
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    globalThis.fetch = (async () => {
       attempts += 1;
-      const url = String(input);
-      if (attempts === 1) {
-        return new Response("nope", { status: 502 });
-      }
-      expect(url.includes("ghproxy")).toBe(true);
-      return new Response(Uint8Array.from([1, 2, 3, 4]), {
-        status: 200,
-        headers: { "content-length": "4" },
-      });
+      return new Response("nope", { status: 502 });
     }) as typeof fetch;
     try {
-      await downloadEmbeddingFile(
+      await expect(downloadEmbeddingFile(
         "https://github.com/ggml-org/llama.cpp/releases/download/b11457/llama-b11457-bin-macos-arm64.tar.gz",
         destination,
         { stallTimeoutMs: 200 },
-      );
-      expect(attempts).toBeGreaterThanOrEqual(2);
-      expect(readFileSync(destination).byteLength).toBe(4);
+      )).rejects.toThrow();
+      expect(attempts).toBe(1); // single candidate, no retry
     } finally {
       globalThis.fetch = originalFetch;
     }

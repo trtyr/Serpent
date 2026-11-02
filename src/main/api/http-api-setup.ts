@@ -30,7 +30,7 @@ try {
   const { token, created, filePath } = readOrCreateApiToken(app.getPath("userData"));
   if (created) {
     // First boot: surface the token in the log once so operators can grab it.
-    runtime.logger?.info("http-api.token", "Generated a new API bearer token.", { filePath, token });
+    runtime.logger?.info("http-api.token", "Generated a new API bearer token.", { filePath });
   } else {
     runtime.logger?.info("http-api.token", "API bearer token available.", { filePath });
   }

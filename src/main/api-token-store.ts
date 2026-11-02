@@ -27,7 +27,7 @@ export function readOrCreateApiToken(userDataDirectory: string): {
     }
   }
   const token = randomBytes(32).toString("hex");
-  writeFileSync(filePath, `${token}\n`, "utf8");
+  writeFileSync(filePath, `${token}\n`, { encoding: "utf8", mode: 0o600, flag: "w" });
   return { token, created: true, filePath };
 }
 

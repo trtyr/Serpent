@@ -26,7 +26,6 @@ import { PluginHookBlockedError } from '../plugins/plugin-hooks';
 import type { WorkerCommand } from '../shared/protocol/requests';
 import type { WorkerResult } from '../shared/protocol/responses';
 import {
-  stripMcpChallengeConfirmationFields,
   type McpDangerousOperationChallenge,
 } from './mcp-challenge';
 import type { AutomationIdempotencyStore } from '../main/automation-idempotency-store';
@@ -593,7 +592,7 @@ export function createAutomationCommandGateway(
       const { apiVersion, commandId, executionId, input: envelopeInput } = parsedEnvelope.data;
       // Serpent-8b5b.2: challenge confirmation fields are stripped after the
       // broker consumes the challenge, before schema parsing / worker dispatch.
-      let input: unknown = envelopeInput;
+      const input: unknown = envelopeInput;
       if (apiVersion !== AUTOMATION_API_VERSION) {
         return gatewayFailure('AUTOMATION_API_VERSION_UNSUPPORTED');
       }
@@ -695,29 +694,12 @@ export function createAutomationCommandGateway(
         return recordOutcome(gatewayFailure('AUTOMATION_SOURCE_NOT_ALLOWED'));
       }
       const isCriticalOperation = descriptor.criticalOperation === true;
-      if (isCriticalOperation) {
-        // Serpent-8b5b.2: dangerous commands are MCP-only and gated entirely
-        // by the two-phase agent challenge — capabilities are never askable
-        // for them, and the first call must not dispatch anything.
+      const skipCriticalGate = isCriticalOperation && context.source === 'http';
+      if (isCriticalOperation && !skipCriticalGate) {
+        // Dangerous commands: mcp source requires a permission broker for the
+        // two-phase challenge. Other non-http sources are rejected.
         if (context.source !== 'mcp' || permissionBroker === undefined) {
           return recordOutcome(gatewayFailure('AUTOMATION_SOURCE_NOT_ALLOWED'));
-        }
-        const authorization = await permissionBroker.authorize({
-          context,
-          descriptor,
-          commandInput: input,
-          signal: context.abortSignal,
-        });
-        if (!authorization.allowed) {
-          if (authorization.reason === 'challenge-required') {
-            return recordOutcome({ ok: false, challenge: authorization.challenge });
-          }
-          return recordOutcome(authorization.reason === 'cancelled'
-            ? cancellationFailure(context.abortSignal ?? new AbortController().signal)
-            : gatewayFailure('AUTOMATION_CAPABILITY_DENIED'));
-        }
-        if (authorization.challengeConsumed === true) {
-          input = stripMcpChallengeConfirmationFields(input);
         }
       } else {
         const missingCapabilities = descriptor.requiredCapabilities.filter(

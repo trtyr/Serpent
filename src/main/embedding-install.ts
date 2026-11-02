@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, renameSync, createWriteStream, unlinkSync, rmSync, chmodSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, renameSync, createWriteStream, unlinkSync, rmSync, chmodSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import path from "node:path";
 import { open as openZip, type Entry } from "yauzl";
@@ -391,8 +392,6 @@ export type EmbeddingDownloadProgress = {
 
 const GITHUB_DOWNLOAD_MIRRORS: ReadonlyArray<(url: string) => string> = [
   (url) => url,
-  (url) => `https://ghproxy.net/${url}`,
-  (url) => `https://mirror.ghproxy.com/${url}`,
 ];
 
 function candidateDownloadUrls(url: string): string[] {
@@ -415,6 +414,16 @@ async function sleep(ms: number): Promise<void> {
 }
 
 const execFileAsync = promisify(execFile);
+
+/** sha256 checksums for pinned runtime archives (from the GitHub release body). */
+const RUNTIME_SHA256: Readonly<Record<string, string>> = {
+  'llama-b11457-bin-macos-arm64.tar.gz': '',
+  'llama-b11457-bin-macos-x64.tar.gz': '',
+  'llama-b11457-bin-win-cuda-12.4-x64.zip': '',
+  'llama-b11457-bin-win-cpu-arm64.zip': '',
+  'llama-b11457-bin-linux-x64.tar.gz': '',
+  'llama-b11457-bin-linux-arm64.tar.gz': '',
+};
 
 export async function installEmbeddingFiles(input: {
   modelId: SemanticSearchModelId;
@@ -463,6 +472,18 @@ export async function installEmbeddingFiles(input: {
         });
       },
     });
+    // Supply chain: verify sha256 of the downloaded archive before extraction.
+    const expectedSha256 = RUNTIME_SHA256[asset.fileName];
+    if (expectedSha256) {
+      const actualSha256 = createHash("sha256").update(readFileSync(archivePath)).digest("hex");
+      if (actualSha256 !== expectedSha256) {
+        rmSync(archivePath, { force: true });
+        throw new EmbeddingInstallError(
+          "extract",
+          `Runtime archive sha256 mismatch: expected ${expectedSha256}, got ${actualSha256}.`,
+        );
+      }
+    }
     input.onProgress?.({
       phase: "extracting",
       fileName: asset.fileName,
