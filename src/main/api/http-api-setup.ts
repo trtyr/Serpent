@@ -34,7 +34,7 @@ try {
   } else {
     runtime.logger?.info("http-api.token", "API bearer token available.", { filePath });
   }
-  const httpHost = process.env.SERPENT_HTTP_HOST === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
+  const httpHost = process.env.SERPENT_HTTP_HOST ?? "127.0.0.1";
   const configuredPort = Number(process.env.SERPENT_HTTP_PORT ?? "");
   httpApiServer = await createHttpApiServer({
     port: Number.isSafeInteger(configuredPort) && configuredPort > 0 ? configuredPort : HTTP_API_DEFAULT_PORT,

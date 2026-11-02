@@ -56,12 +56,14 @@ export interface HttpApiServer {
   close(): Promise<void>;
 }
 
+type JsonSchemaRecord = Record<string, unknown>;
+
+let catalogCache: CatalogEntry[] | undefined;
+
 type CatalogEntry = {
   descriptor: AutomationCommandDescriptor;
   toolName: string;
 };
-
-let catalogCache: CatalogEntry[] | undefined;
 
 function catalog(): CatalogEntry[] {
   if (catalogCache === undefined) {
@@ -76,12 +78,6 @@ function findCommand(toolName: string): CatalogEntry | undefined {
   return catalog().find((entry) => entry.toolName === toolName);
 }
 
-/**
- * Commands that operate on a library need an explicit `libraryId` target in
- * each call (stateless contract): either declared via `libraryContext` or
- * derived from the command's target scope — same rule the removed MCP layer
- * applied.
- */
 function libraryContextFor(descriptor: AutomationCommandDescriptor): "none" | "active" | "transition" {
   if (descriptor.libraryContext !== undefined) return descriptor.libraryContext;
   return descriptor.targetScope === "library"
@@ -140,7 +136,6 @@ function requestAuthorized(request: http.IncomingMessage, token: string): boolea
   return presented !== null && constantTimeTokenEquals(presented, token);
 }
 
-/** Transient gateway codes a client may reasonably retry unchanged. */
 const RETRYABLE_GATEWAY_CODES = new Set([
   "LIBRARY_BUSY",
   "AUTOMATION_LIBRARY_CONTEXT_BUSY",
@@ -155,21 +150,79 @@ function httpStatusForGatewayCode(code: string): number {
   return 400;
 }
 
-type JsonSchemaRecord = Record<string, unknown>;
+/** Inject `libraryId` into the generated schema for library-scoped commands. */
+function injectLibraryId(schema: JsonSchemaRecord, descriptor: AutomationCommandDescriptor): JsonSchemaRecord {
+  if (libraryContextFor(descriptor) !== "active") return schema;
+  const props = (schema.properties ?? {}) as JsonSchemaRecord;
+  if (props.libraryId !== undefined) return schema;
+  const required = Array.isArray(schema.required) ? [...schema.required] : undefined;
+  return {
+    ...schema,
+    properties: {
+      libraryId: {
+        type: "string",
+        description: "Target library ID (required for library-scoped commands). Use serpent_library_list_open to discover.",
+      },
+      ...props,
+    },
+    required: ["libraryId", ...(required ?? [])],
+  };
+}
 
-function inputSchemaToJsonSchema(descriptor: AutomationCommandDescriptor): JsonSchemaRecord | undefined {
+function inputSchemaToJsonSchema(descriptor: AutomationCommandDescriptor): JsonSchemaRecord {
   const schema = descriptor.api.inputSchema ?? descriptor.inputSchema;
   try {
-    return z.toJSONSchema(schema, { io: "input" }) as JsonSchemaRecord;
+    const raw = z.toJSONSchema(schema, { io: "input" }) as JsonSchemaRecord;
+    return injectLibraryId(raw, descriptor);
   } catch {
-    // Schemas with constructs JSON Schema cannot express fall back to a
-    // descriptive stub; the command remains fully usable.
-    return { type: "object", additionalProperties: true };
+    const stub: JsonSchemaRecord = { type: "object", additionalProperties: true };
+    return injectLibraryId(stub, descriptor);
   }
 }
 
-function buildOpenApiDocument(port: number, appVersion: string): JsonSchemaRecord {
+// ── OpenAPI / docs generation (needs bound host for servers URL) ─────────
+
+function buildOpenApiDocument(host: string, port: number, appVersion: string): JsonSchemaRecord {
+  const baseUrl = host === "0.0.0.0" || host === "::"
+    ? `http://127.0.0.1:${port}`  // wildcard binding → use loopback in spec (client connects to their own host)
+    : `http://${host}:${port}`;
+
   const paths: JsonSchemaRecord = {};
+
+  // Infrastructure endpoints
+  paths["/ping"] = {
+    get: {
+      operationId: "ping",
+      summary: "Liveness probe (no auth required)",
+      responses: { "200": { description: "Service is alive" } },
+    },
+  };
+  paths["/commands"] = {
+    get: {
+      operationId: "list_commands",
+      summary: "JSON catalog of all available commands with input schemas",
+      tags: ["meta"],
+      responses: { "200": { description: "Command catalog" } },
+    },
+  };
+  paths["/openapi.json"] = {
+    get: {
+      operationId: "get_openapi_spec",
+      summary: "OpenAPI 3.1 specification (this document)",
+      tags: ["meta"],
+      responses: { "200": { description: "OpenAPI 3.1 JSON" } },
+    },
+  };
+  paths["/docs"] = {
+    get: {
+      operationId: "get_docs",
+      summary: "Human-readable HTML documentation",
+      tags: ["meta"],
+      responses: { "200": { description: "HTML page" } },
+    },
+  };
+
+  // Command endpoints
   for (const { descriptor, toolName } of catalog()) {
     paths[`/commands/${toolName}`] = {
       post: {
@@ -179,19 +232,25 @@ function buildOpenApiDocument(port: number, appVersion: string): JsonSchemaRecor
         "x-command-id": descriptor.commandId,
         "x-impact": descriptor.impact,
         "x-atomicity": descriptor.atomicity,
+        "x-allowed-sources": ["http"],
         ...(descriptor.criticalOperation === true ? { "x-critical-operation": true } : {}),
-        ...(descriptor.libraryContext === undefined ? {} : { "x-library-context": descriptor.libraryContext }),
+        ...(descriptor.libraryContext !== undefined
+          ? { "x-library-context": descriptor.libraryContext }
+          : libraryContextFor(descriptor) !== "none"
+            ? { "x-library-context": libraryContextFor(descriptor) }
+            : {}),
         requestBody: {
           required: true,
           content: { "application/json": { schema: inputSchemaToJsonSchema(descriptor) } },
         },
         responses: {
-          "200": { description: "Command executed (or returned a structured challenge).", content: { "application/json": { schema: { type: "object" } } } },
+          "200": { description: "Command executed (or returned a structured challenge)." },
           "4XX": { description: "Structured gateway error; body carries { ok: false, code, message }." },
         },
       },
     };
   }
+
   return {
     openapi: "3.1.0",
     info: {
@@ -200,7 +259,7 @@ function buildOpenApiDocument(port: number, appVersion: string): JsonSchemaRecor
       description: `Full headless API of the Serpent asset backend (automation API v${AUTOMATION_API_VERSION}). `
         + "Authenticate every request with `Authorization: Bearer <token>`; the token lives in the `api-token` file under the Serpent data directory.",
     },
-    servers: [{ url: `http://127.0.0.1:${port}` }],
+    servers: [{ url: baseUrl }],
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer" },
@@ -219,13 +278,15 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function buildDocsPage(port: number, appVersion: string): string {
+function buildDocsPage(host: string, port: number, appVersion: string): string {
   const rows = catalog().map(({ descriptor, toolName }) => {
     const risk = descriptor.criticalOperation === true ? "critical" : descriptor.impact;
+    const libCtx = libraryContextFor(descriptor);
+    const libNote = libCtx === "active" ? " (需 libraryId)" : "";
     return [
       "    <tr>",
       `      <td><code>POST /commands/${escapeHtml(toolName)}</code></td>`,
-      `      <td>${escapeHtml(descriptor.summary)}</td>`,
+      `      <td>${escapeHtml(descriptor.summary)}${libNote}</td>`,
       `      <td>${escapeHtml([...descriptor.requiredCapabilities].join(", "))}</td>`,
       `      <td>${escapeHtml(risk)}</td>`,
       "    </tr>",
@@ -244,18 +305,25 @@ function buildDocsPage(port: number, appVersion: string): string {
     th, td { border: 1px solid #d9dbe0; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
     th { background: #f2f3f5; }
     .auth { background: #eef4ff; border: 1px solid #b9cfF7; padding: 0.8rem 1rem; border-radius: 8px; }
+    .endpoint { margin-top: 0.5rem; }
   </style>
 </head>
 <body>
   <h1>Serpent HTTP API <small style="font-weight:normal">v${escapeHtml(appVersion)} (automation API v${AUTOMATION_API_VERSION})</small></h1>
   <div class="auth">
-    <p><strong>认证</strong>：除 <code>GET /ping</code> 外，所有请求需携带
-    <code>Authorization: Bearer &lt;token&gt;</code>（或 <code>X-Serpent-Token</code> 头）。
+    <p><strong>认证</strong>：除 <code>GET /ping</code> 外，所有请求（含本页）均需携带
+    <code>Authorization: Bearer &lt;token&gt;</code>（或 <code>X-Serpent-Token</code> 头），否则返回 401。
     Token 在首次启动时生成，存放于 Serpent 数据目录的 <code>api-token</code> 文件。</p>
-    <p><strong>机器可读文档</strong>：<code>GET /openapi.json</code>（OpenAPI 3.1）；
-    <code>GET /commands</code>（JSON 目录）。</p>
+    <p><strong>基础设施端点</strong>：</p>
+    <div class="endpoint">
+      <code>GET /ping</code> — 存活探针（免认证）<br/>
+      <code>GET /commands</code> — JSON 命令目录（含 inputSchema）<br/>
+      <code>GET /openapi.json</code> — OpenAPI 3.1 规范<br/>
+      <code>GET /docs</code> — 本页
+    </div>
   </div>
   <h2>命令目录（${catalog().length}）</h2>
+  <p>标注 <em>(需 libraryId)</em> 的命令必须在请求体中传入 <code>libraryId</code> 字段。</p>
   <table>
     <thead><tr><th>路由</th><th>说明</th><th>能力</th><th>影响</th></tr></thead>
     <tbody>
@@ -282,7 +350,11 @@ function buildCatalogJson(): JsonSchemaRecord {
       supportsDryRun: descriptor.supportsDryRun,
       supportsIdempotencyKey: descriptor.supportsIdempotencyKey,
       ...(descriptor.criticalOperation === true ? { criticalOperation: true } : {}),
-      ...(descriptor.libraryContext === undefined ? {} : { libraryContext: descriptor.libraryContext }),
+      ...(descriptor.libraryContext !== undefined
+        ? { libraryContext: descriptor.libraryContext }
+        : libraryContextFor(descriptor) !== "none"
+          ? { libraryContext: libraryContextFor(descriptor) }
+          : {}),
       inputSchema: inputSchemaToJsonSchema(descriptor),
     })),
   };
@@ -328,7 +400,7 @@ async function executeCommand(
         payload: {
           ok: false,
           code: "API_LIBRARY_TARGET_REQUIRED",
-          message: `Command ${toolName} requires an explicit libraryId. Use library.list-open or library.create first.`,
+          message: `Command ${toolName} requires an explicit libraryId. Use serpent_library_list_open or serpent_library_create first.`,
         },
       };
     }
@@ -360,9 +432,6 @@ async function executeCommand(
 
   if (!gatewayResult.ok) {
     if ("challenge" in gatewayResult && gatewayResult.challenge !== undefined) {
-      // Structured two-phase challenge for dangerous commands: a result, not
-      // an error — the operator decides how to proceed (same contract as the
-      // removed MCP surface).
       return {
         status: 200,
         payload: {
@@ -388,9 +457,6 @@ async function executeCommand(
   }
 
   const serialized = JSON.stringify(gatewayResult.result) ?? "null";
-  // Byte budget comes from the execution's resource budget (1 MiB default),
-  // exactly like the removed MCP call path. `api.outputLimit` is an entry
-  // count for host declarations, not a byte cap.
   const maxOutputBytes = context.resourceBudget?.maxOutputBytes ?? 1024 * 1024;
   if (Buffer.byteLength(serialized, "utf8") > maxOutputBytes) {
     return { status: 413, payload: { ok: false, code: "API_OUTPUT_LIMIT_EXCEEDED", message: "The command result exceeds the execution output budget." } };
@@ -414,11 +480,6 @@ async function executeCommand(
   };
 }
 
-/**
- * Starts the HTTP API server. Binds to the loopback by default; set
- * `SERPENT_HTTP_HOST=0.0.0.0` (via options.host) to expose it on the network —
- * the bearer token is then the only gate, so only do this on trusted networks.
- */
 export async function createHttpApiServer(options: HttpApiServerOptions): Promise<HttpApiServer> {
   const host = options.host ?? "127.0.0.1";
 
@@ -443,17 +504,21 @@ export async function createHttpApiServer(options: HttpApiServerOptions): Promis
       return;
     }
     if (!requestAuthorized(request, options.token)) {
-      writeJson(response, 401, { ok: false, code: "API_UNAUTHORIZED", message: "Missing or invalid bearer token." });
+      writeJson(response, 401, {
+        ok: false,
+        code: "API_UNAUTHORIZED",
+        message: "Missing or invalid bearer token. Send Authorization: Bearer <token> (see GET /docs).",
+      });
       return;
     }
 
     if (method === "GET" && pathname === "/openapi.json") {
-      writeJson(response, 200, buildOpenApiDocument(options.port, options.appVersion));
+      writeJson(response, 200, buildOpenApiDocument(host, options.port, options.appVersion));
       return;
     }
     if (method === "GET" && pathname === "/docs") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      response.end(buildDocsPage(options.port, options.appVersion));
+      response.end(buildDocsPage(host, options.port, options.appVersion));
       return;
     }
     if (method === "GET" && pathname === "/commands") {
@@ -470,7 +535,7 @@ export async function createHttpApiServer(options: HttpApiServerOptions): Promis
       }
       const entry = findCommand(decodeURIComponent(commandMatch[1]!));
       if (entry === undefined) {
-        writeJson(response, 404, { ok: false, code: "API_COMMAND_NOT_FOUND", message: `Unknown command. See GET /commands for the catalog.` });
+        writeJson(response, 404, { ok: false, code: "API_COMMAND_NOT_FOUND", message: "Unknown command. See GET /commands for the catalog." });
         return;
       }
       const abortController = new AbortController();

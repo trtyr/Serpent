@@ -89,7 +89,8 @@ describe("headless HTTP API server", () => {
     const openapi = JSON.parse((await request(port, "GET", "/openapi.json", token)).body);
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.components.securitySchemes.bearerAuth.scheme).toBe("bearer");
-    expect(Object.keys(openapi.paths).length).toBe(catalog.count);
+        // 59 command paths + 4 infrastructure endpoints (/ping, /commands, /openapi.json, /docs)
+    expect(Object.keys(openapi.paths).length).toBe(catalog.count + 4);
 
     const docs = await request(port, "GET", "/docs", token);
     expect(docs.status).toBe(200);
